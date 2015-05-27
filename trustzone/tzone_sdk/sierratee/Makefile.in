@@ -1,0 +1,728 @@
+SHELL := /bin/bash
+cur_dir=$(SDK_PATH)/sierratee
+src_dir=$(cur_dir)/src
+package_dir=$(src_dir)/package
+fs_mnt_dir=/tmp/fs_mnt
+bin_dir=$(cur_dir)/../bin
+libc_dir=/tmp/lib
+
+build_dir=$(cur_dir)/build
+libc_build_dir=$(cur_dir)/libc_build
+app_build_dir=$(cur_dir)/app_build
+modules_build_dir=$(cur_dir)/modules_build
+
+crypto_dir=$(PACKAGE_BUILD_DIR)/openssl
+ffmpeg_dir=$(PACKAGE_BUILD_DIR)/ffmpeg
+sdl_dir=$(PACKAGE_BUILD_DIR)/libsdl
+
+#LIB=libc
+ifeq ($(NON_SECURE_BOOTWRAPPER_SUPPORT),y)
+KERNEL_ELF = $(bin_dir)/normal.elf
+else
+KERNEL_ELF = $(bin_dir)/normal.bin
+endif
+
+KERNEL = $(cur_dir)/normal.bin
+
+ifeq ($(CONFIG_MULTI_GUESTS_SUPPORT),y)
+ifeq ($(NON_SECURE_BOOTWRAPPER_SUPPORT),y)
+KERNEL_ELF_2 = $(bin_dir)/normal_2.elf
+else
+KERNEL_ELF2 = $(bin_dir)/normal_2.bin
+endif
+KERNEL_2 = $(cur_dir)/normal_2.bin
+INITRD = $(cur_dir)/linux2_initrd.bin.gz
+endif
+
+# Check if verbosity is ON for build process
+VERBOSE_DEFAULT    := 0
+CMD_PREFIX_DEFAULT := @
+ifdef VERBOSE
+	ifeq ("$(origin VERBOSE)", "command line")
+		VB := $(VERBOSE)
+	else
+		VB := $(VERBOSE_DEFAULT)
+	endif
+else
+	VB := $(VERBOSE_DEFAULT)
+endif
+ifeq ($(VB), 1)
+	V :=
+else
+	V := $(CMD_PREFIX_DEFAULT)
+endif
+
+# Name & Version
+export PROJECT_NAME = sierratee
+export PROJECT_VERSION = 0.1
+export DEPENDENCY_FILE=$(build_dir)/.deps
+export LIBC_DEPENDENCY_FILE=$(libc_build_dir)/.deps
+export APPS_DEPENDENCY_FILE=$(app_build_dir)/.deps
+
+ifeq ($(BOARD), VE)
+export CONFIG_FILE= $(cur_dir)/config/config.ve
+export BOARD_DIR=ve
+else ifeq ($(BOARD), s5pv310)
+export CONFIG_FILE= $(cur_dir)/config/config.s5pv310
+export BOARD_DIR=exynos4
+else ifeq ($(BOARD), mvv4412)
+export CONFIG_FILE= $(cur_dir)/config/config.mvv4412
+export BOARD_DIR=exynos4
+else ifeq ($(BOARD), zynq7)
+export CONFIG_FILE= $(cur_dir)/config/config.zynq7
+export BOARD_DIR=zynq7
+else
+export CONFIG_FILE= $(cur_dir)/config/config.ve
+export BOARD_DIR=ve
+endif
+
+ifeq ($(ARM_ARCH), ARMV7)
+export ARCH_DIR=armv7
+endif
+
+# Include configuration file if present
+-include $(CONFIG_FILE)
+-include $(CONFIG_PACKAGE_FILE)
+
+ifeq ($(CONFIG_NEWLIB), n)
+ifeq ($(CONFIG_CRYPTO), y)
+CONFIG_NEWLIB=y
+endif
+ifeq ($(CONFIG_FFMPEG), y)
+CONFIG_NEWLIB=y
+endif
+endif
+
+ifeq ($(ARM_CPU), CORTEX_A8)
+TARGET_CCFLAGS += -DCONFIG_CORTEX_A8=1 -mcpu=cortex-a8
+TARGET_ASMFLAGS += -DCONFIG_CORTEX_A8=1 -mcpu=cortex-a8
+export PLATFORM_DIR=Cortex-A8
+endif
+
+ifeq ($(ARM_CPU), CORTEX_A9)
+TARGET_CCFLAGS += -DCONFIG_CORTEX_A9=1 -mcpu=cortex-a9
+TARGET_ASMFLAGS += -DCONFIG_CORTEX_A9=1 -mcpu=cortex-a9
+export PLATFORM_DIR=Cortex-A9
+endif
+
+ifeq ($(ARM_CPU), CORTEX_A15)
+TARGET_CCFLAGS += -DCONFIG_CORTEX_A15=1 -march=armv7-a
+TARGET_ASMFLAGS += -DCONFIG_CORTEX_A15=1 -march=armv7-a
+export PLATFORM_DIR=Cortex-A15
+endif
+
+ifeq ($(OTZONE_ASYNC_NOTIFY_SUPPORT), y)
+TARGET_CCFLAGS += -DOTZONE_ASYNC_NOTIFY_SUPPORT=y
+TARGET_ASMFLAGS += -DOTZONE_ASYNC_NOTIFY_SUPPORT=y
+endif
+
+ifeq ($(CONFIG_MULTI_GUESTS_SUPPORT),y)
+ifneq ($(BOARD), zynq7)
+TARGET_CCFLAGS += -DSCHEDULE_HIGH_PRIORITY_GUEST=1
+TARGET_ASMFLAGS += -DSCHEDULE_HIGH_PRIORITY_GUEST=1
+endif
+endif
+
+# Setup path of directories
+export lib_user_dir=$(src_dir)/lib/user
+export lib_kernel_dir=$(src_dir)/lib/kernel
+export lib_common_dir=$(src_dir)/lib/common
+export cpu_arch_dir=$(src_dir)/arch/arm/$(ARCH_DIR)
+export cpu_platform_dir=$(src_dir)/arch/arm/$(ARCH_DIR)/$(PLATFORM_DIR)
+export drivers_common_dir=$(src_dir)/drivers/common
+export drivers_dir=$(src_dir)/drivers/$(BOARD_DIR)
+export core_dir=$(src_dir)/core
+export apps_dir=$(src_dir)/apps
+export test_dir=$(src_dir)/apps/test_suite
+export fs_dir=$(src_dir)/fs
+export package_src_dir=$(package_dir)/src
+export module_src_dir=$(src_dir)/apps
+
+offsets-file= $(cpu_arch_dir)/include/asm-offsets.h
+device-file= $(drivers_dir)/include/sw_device_io.h
+LD_SCRIPT	= $(drivers_dir)/linker.ld.S
+
+# Setup list of objects for compilation
+lib-user-object-mks=$(shell if [[ -d $(lib_user_dir) ]]; then find $(lib_user_dir) -iname "objects.mk" | sort -r; fi)
+lib-kernel-object-mks=$(shell if [[ -d $(lib_kernel_dir) ]]; then find $(lib_kernel_dir) -iname "objects.mk" | sort -r; fi)
+lib-common-object-mks=$(shell if [[ -d $(lib_common_dir) ]]; then find $(lib_common_dir) -iname "objects.mk" | sort -r; fi)
+core-object-mks=$(shell if [[ -d $(core_dir) ]]; then find $(core_dir) -iname "objects.mk" | sort -r; fi)
+apps-object-mks=$(shell if [[ -d $(apps_dir) ]]; then find $(apps_dir) -iname "objects.mk" | sort -r; fi)
+test-object-mks=$(shell if [[ -d $(test_dir) ]]; then find $(test_dir) -iname "objects.mk" | sort -r; fi)
+cpu-object-mks=$(shell if [ -d $(cpu_arch_dir) ]; then find $(cpu_arch_dir) -iname "objects.mk" | sort -r; fi)
+cpu-platform-mks=$(shell if [ -d $(cpu_platform_dir) ]; then find $(cpu_platform_dir) -iname "platform_objects.mk" | sort -r; fi)
+drivers-common-object-mks=$(shell if [ -d $(drivers_common_dir) ]; then find $(drivers_common_dir) -iname "objects.mk" | sort -r; fi)
+drivers-object-mks=$(shell if [ -d $(drivers_dir) ]; then find $(drivers_dir) -iname "objects.mk" | sort -r; fi)
+fs-object-mks=$(shell if [ -d $(fs_dir) ]; then find $(fs_dir) -iname "objects.mk" | sort -r; fi)
+package-object-mks=$(shell if [ -d $(package_src_dir) ]; then find $(package_src_dir) -iname "objects.mk" | sort -r; fi)
+
+include $(lib-user-object-mks) 
+include $(lib-kernel-object-mks) 
+include $(lib-common-object-mks) 
+include $(core-object-mks) 
+include $(apps-object-mks)
+include $(test-object-mks)
+include $(drivers-common-object-mks) 
+include $(drivers-object-mks) 
+include $(cpu-object-mks) 
+include $(cpu-platform-mks) 
+include $(fs-object-mks) 
+include $(package-object-mks) 
+
+objs-y=$(foreach obj,$(cpu-objs-y),$(build_dir)/arch/arm/$(ARCH_DIR)/$(obj))
+objs-y+=$(foreach obj,$(lib-common-objs-y),$(build_dir)/lib/common/$(obj))
+objs-y+=$(foreach obj,$(lib-kernel-objs-y),$(build_dir)/lib/kernel/$(obj))
+objs-y+=$(foreach obj,$(core-objs-y),$(build_dir)/core/$(obj))
+objs-y+=$(foreach obj,$(kernel-apps-objs-y),$(build_dir)/apps/$(obj))
+objs-y+=$(foreach obj,$(kernel-test-apps-objs-y),$(build_dir)/apps/test_suite/$(obj))
+objs-y+=$(foreach obj,$(fs-objs-y),$(build_dir)/fs/$(obj))
+objs-y+=$(foreach obj,$(drivers-common-objs-y),$(build_dir)/drivers/common/$(obj))
+objs-y+=$(foreach obj,$(drivers-objs-y),$(build_dir)/drivers/$(BOARD_DIR)/$(obj))
+objs-y+=$(foreach obj,$(cpu-platform-objs-y),$(build_dir)/arch/arm/$(ARCH_DIR)/$(PLATFORM_DIR)/$(obj))
+objs-y+=$(foreach obj,$(package-objs-y),$(build_dir)/package/src/$(obj))
+
+libc-objs-y = $(foreach obj,$(lib-common-objs-y),$(libc_build_dir)/lib/common/$(obj))
+libc-objs-y += $(foreach obj,$(lib-user-objs-y),$(libc_build_dir)/lib/user/$(obj))
+libc-objs-y +=$(foreach obj,$(ulib-cpu-objs-y),$(libc_build_dir)/arch/arm/$(ARCH_DIR)/$(obj))
+
+module-objs-y=$(foreach obj,$(modules-objs-y),$(modules_build_dir)/apps/$(obj))
+module-objs-y += $(foreach obj,$(test-modules-objs-y),$(modules_build_dir)/apps/test_suite/$(obj))
+
+ifeq ($(CONFIG_CRYPTO), y)
+module-crypto-objs-y=$(foreach obj,$(modules-crypto-objs-y),$(modules_build_dir)/apps/$(obj))
+module-crypto-objs-y+=$(foreach obj,$(lib-crypto-objs-y),$(modules_build_dir)/lib/user/$(obj))
+endif
+
+ifeq ($(CONFIG_FFMPEG), y)
+module-ffmpeg-objs-y=$(foreach obj,$(modules-ffmpeg-objs-y),$(modules_build_dir)/apps/$(obj))
+endif
+
+
+user-apps-objs-y=$(foreach obj,$(apps-objs-y),$(app_build_dir)/apps/$(obj))
+user-apps-objs-y += $(foreach obj,$(test-apps-objs-y),$(app_build_dir)/apps/test_suite/$(obj))
+
+ifeq ($(CONFIG_CRYPTO), y)
+user-apps-objs-y += $(foreach obj,$(lib-crypto-objs-y),$(app_build_dir)/lib/user/$(obj))
+endif
+
+# Setup list of deps files for compilation
+deps-y=$(objs-y:.o=.dep)
+libc-deps-y=$(libc-objs-y:.o=.dep)
+apps-deps-y=$(user-apps-objs-y:.o=.dep)
+modules-deps-y=$(module-objs-y:.o=.dep)
+
+# Setup list of targets for compilation
+targets-y=$(build_dir)/SierraTEE.elf
+
+targets-y+=$(build_dir)/SierraTEE.bin
+
+
+ifeq ($(CONFIG_NEWLIB), y)
+export CROSS_COMPILE=$(CROSS_COMPILE_NEWLIB)
+endif
+
+# Setup compilation environment
+cpp=$(CROSS_COMPILE)cpp
+cppflags=-I$(SDK_PATH)/include
+cppflags+=-I$(src_dir)/lib/include
+cppflags+=-I$(src_dir)/core/include
+cppflags+=-I$(src_dir)/apps/include
+cppflags+=-I$(src_dir)/apps/test_suite/include
+cppflags+=-I$(src_dir)/fs/include
+cppflags+=-I$(src_dir)/arch/arm/$(ARCH_DIR)/include
+cppflags+=-I$(src_dir)/drivers/common/include
+cppflags+=-I$(package_src_dir)/include
+cppflags+=-I$(src_dir)/lib/common/include
+cppflags+=-I$(src_dir)/lib/kernel/include
+
+cppflags+=-I$(src_dir)/drivers/$(BOARD_DIR)/include
+cppflags+=-I$(src_dir)/arch/arm/$(ARCH_DIR)/$(PLATFORM_DIR)/include
+
+libc_includes=-I$(SDK_PATH)/include
+libc_includes+=-I$(src_dir)/lib/common/include
+libc_includes+=-I$(src_dir)/lib/user/include
+
+app_includes = $(libc_includes)
+app_includes += -I$(src_dir)/apps/include
+app_includes += -I$(src_dir)/apps/test_suite/include
+sstrip = $(CROSS_COMPILE)strip
+cc=$(CROSS_COMPILE)gcc
+cflags=  -O2  -Wall -fno-common -D_OTZ_NO_LIBC_BUILD=1 
+ifeq ($(DEBUG), y)
+	cflags += -g
+endif
+
+lib_ld = $(CROSS_COMPILE)ld
+multi_ldflags = -r 
+
+kern_ldflags = $(multi_ldflags)
+kern_ldflags += -nostartfiles -nostdlib -o
+
+lib_ldflags = $(multi_ldflags)
+
+ifeq ($(CONFIG_NEWLIB), y)
+	cflags+= -mno-unaligned-access
+endif
+ifneq ($(CONFIG_NEWLIB), y)
+	lib_ldflags += -nostdlib
+else
+	newlib_toolchain_bin_dir=$(shell dirname $(lib_ld))
+	newlib_lib_dir=$(newlib_toolchain_bin_dir)/../arm-none-eabi/lib
+	newlib_libgcc_file=$(shell $(cc) -print-libgcc-file-name)
+	newlib_libgcc_dir=$(shell dirname $(newlib_libgcc_file))
+	newlib_math_lib_dir=$(newlib_toolchain_bin_dir)/../arm-none-eabi/lib
+endif
+
+
+cflags+=-msoft-float -mno-thumb-interwork -marm  -nostdlib
+
+ifeq ($(CONFIG_NEON_SUPPORT), y)
+cflags+= -mfloat-abi=softfp -mfpu=neon
+endif
+
+ifeq ($(CONFIG_NEWLIB), y)
+cflags +=  -DNEWLIB_SUPPORT
+else 
+cflags += -fno-short-enums
+endif
+
+kern_cflags=$(cppflags) $(TARGET_CCFLAGS)
+kern_cflags+= $(cflags) -DSW_KERNEL
+
+ifeq ($(CONFIG_CRYPTO), y)
+kern_cflags += -DCONFIG_CRYPTO
+endif
+
+ifeq ($(CONFIG_FFMPEG), y)
+kern_cflags += -DCONFIG_FFMPEG
+endif
+
+libc_cflags=$(cflags) $(TARGET_CCFLAGS)
+libc_cflags+=$(libc_includes)
+
+app_cflags=$(cflags) $(TARGET_CCFLAGS)
+app_cflags+=$(app_includes)
+
+ifeq ($(CONFIG_CRYPTO), y)
+app_cflags += -DCONFIG_CRYPTO -D__bare_metal__ 
+app_cflags+=-I$(crypto_dir)/include
+app_cflags+=-I$(crypto_dir)/crypto/modes
+endif
+
+ifeq ($(CONFIG_FFMPEG), y)
+app_cflags += -DCONFIG_FFMPEG
+app_cflags+= -I$(ffmpeg_dir)
+endif
+
+
+as=$(CROSS_COMPILE)gcc
+asflags=-O2 -Wall -D__ASSEMBLY__ -fno-common 
+ifeq ($(DEBUG), y)
+	asflags += -g
+endif
+
+asflags+= -mno-thumb-interwork -marm
+ifeq ($(CONFIG_NEON_SUPPORT), y)
+asflags+= -mfpu=neon
+endif
+
+kern_asflags=$(asflags)
+kern_asflags+=$(cppflags) $(TARGET_ASMFLAGS) -DSW_KERNEL -nostdlib
+
+libc_asflags=$(asflags) $(TARGET_ASMFLAGS)
+libc_asflags+=$(libc_includes) -nostdlib
+ifeq ($(CONFIG_NEWLIB), y)
+libc_asflags +=  -DNEWLIB_SUPPORT
+endif
+
+app_asflags=$(cflags) $(TARGET_ASMFLAGS)
+app_asflags+=$(app_includes)
+
+app_ldflags = -r -nostartfiles
+ifneq ($(CONFIG_NEWLIB), y)
+app_ldflags+=-nostdlib
+endif
+
+
+ifeq ($(CONFIG_CRYPTO), y)
+crypto_libs = -L$(crypto_dir) -lcrypto
+crypto_libs+= -L$(crypto_dir) -lssl
+extra_app_ldflags+=$(crypto_libs)
+endif
+
+ifeq ($(CONFIG_FFMPEG), y)
+ffmpeg_libs = -L$(ffmpeg_dir)/libswresample/ -lswresample
+ffmpeg_libs+= -L$(ffmpeg_dir)/libavformat/ -lavformat
+ffmpeg_libs+= -L$(ffmpeg_dir)/libavfilter/ -lavfilter
+ffmpeg_libs+= -L$(ffmpeg_dir)/libswscale/ -lswscale
+ffmpeg_libs+= -L$(ffmpeg_dir)/libavresample/ -lavresample
+ffmpeg_libs+= -L$(ffmpeg_dir)/libavcodec/ -lavcodec
+ffmpeg_libs+= -L$(ffmpeg_dir)/libavutil/ -lavutil
+ffmpeg_libs+= -L$(ffmpeg_dir)/libavdevice/ -lavdevice
+sdl_libs = -L$(sdl_dir) -lSDL
+extra_app_ldflags+=$(ffmpeg_libs) $(sdl_libs) $(math_lib) 
+endif
+
+
+ar=$(CROSS_COMPILE)ar
+arflags=rcs
+ranlib=$(CROSS_COMPILE)ranlib
+ld=$(CROSS_COMPILE)gcc
+ldflags=-O2 -Wall -fno-common
+
+ldflags += -nostdlib -nostartfiles
+ifeq ($(DEBUG), y)
+	ldflags += -g
+endif
+
+ldflags+=-Wl,-T$(cur_dir)/linker.ld 
+objcopy=$(CROSS_COMPILE)objcopy
+nm=$(CROSS_COMPILE)nm
+
+final-objs-y=$(objs-y)
+
+# Default rule "make"
+.PHONY: all
+all: $(CONFIG_FILE) $(device-file) $(offsets-file) $(DEPENDENCY_FILE) $(LIBC_DEPENDENCY_FILE) \
+	 KERNELS libc user_app linker.ld $(targets-y)
+
+test:
+#	@echo $(objs-y) $(libc-objs-y) $(targets-y)
+#	@echo $(libc-objs-y)
+
+$(device-file):
+	$(V)gcc -I$(drivers_dir)/include -o $(bin_dir)/device.bin $(drivers_dir)/device_io_remap.c
+	$(bin_dir)/device.bin > $(device-file)
+
+-include $(DEPENDENCY_FILE)
+$(DEPENDENCY_FILE): $(deps-y)
+	@echo "where is dep file"
+	$(V)cat $(deps-y) > $(DEPENDENCY_FILE)
+
+-include $(LIBC_DEPENDENCY_FILE)
+$(LIBC_DEPENDENCY_FILE): $(libc-deps-y)
+	@echo "where is libc-dep file"
+	$(V)cat $(libc-deps-y) > $(LIBC_DEPENDENCY_FILE)
+
+-include $(APPS_DEPENDENCY_FILE)
+$(APPS_DEPENDENCY_FILE): $(apps-deps-y)
+	$(V)cat $(apps-deps-y) > $(APPS_DEPENDENCY_FILE)
+
+linker.ld: $(LD_SCRIPT)
+	$(cc) $(kern_cflags) -E -P -C -o $@ $<
+
+# Rules to build .S and .c files
+$(build_dir)/SierraTEE.bin: $(build_dir)/SierraTEE.elf
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (objcopy)   $(subst $(build_dir)/,,$@)")
+	$(V)$(objcopy) -O binary $< $@
+	$(V)cp -f $@ $(bin_dir)
+
+KERNELS : $(KERNEL) $(KERNEL_2)
+
+$(KERNEL) :
+ifeq ($(NON_SECURE_BOOTWRAPPER_SUPPORT),y)
+	$(V)$(objcopy) -O binary $(KERNEL_ELF) $@
+else
+	cp $(KERNEL_ELF) $(KERNEL)
+endif
+$(KERNEL_2) :
+ifeq ($(NON_SECURE_BOOTWRAPPER_SUPPORT),y)
+	$(V)$(objcopy) -O binary $(KERNEL_ELF_2) $@
+else
+	cp $(KERNEL_ELF_2) $(KERNEL_2)
+endif
+
+
+$(build_dir)/SierraTEE.elf: sw_kernel KERNELS
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (ld)        $(subst $(build_dir)/,,$@)")
+	$(V)$(ld)  $(ldflags)  -o $@
+	$(V)cp -f $@ $(bin_dir)
+	$(V)$(sstrip) -s $(bin_dir)/SierraTEE.elf
+	$(V)rm -f $(KERNEL) $(KERNEL_2) $(INITRD)
+
+
+sw_kernel: $(final-objs-y)
+	@$(lib_ld) $(kern_ldflags) $(build_dir)/kernel.o $(final-objs-y) 
+	$(objcopy) -w --localize-symbol=__aeabi_uldivmod \
+			   	--localize-symbol=schedule \
+			   	--localize-symbol=exit_usr_task \
+			   	--localize-symbol=__aeabi_uidiv \
+			   	--localize-symbol=__aeabi_idivmod \
+			   	--localize-symbol=sw_memset \
+			   	--localize-symbol=sw_strncat \
+				--localize-symbol=sw_vsprintf \
+			   	--localize-symbol=sw_strcpy \
+			 	--localize-symbol=sw_strlen \
+                --localize-symbol=sw_strnlen \
+			  	--localize-symbol=sw_strncpy \
+			   	--localize-symbol=sw_strcat \
+			   	--localize-symbol=sw_strtoi \
+			   	--localize-symbol=sw_strchr \
+			   	--localize-symbol=sw_maxstrncpy \
+			   	--localize-symbol=sw_strncmp \
+			   	--localize-symbol=sw_strcmp \
+			   	--localize-symbol=sw_memcmp \
+				--localize-symbol=sw_memcpy \
+			   	--localize-symbol=sw_memncpy \
+			   	--localize-symbol=sw_memmove \
+			   	--localize-symbol=get_buddy_ptr_size \
+			   	--localize-symbol=sw_buddy_init \
+			   	--localize-symbol=sw_buddy_alloc \
+			   	--localize-symbol=sw_buddy_free \
+			   	--localize-symbol=get_manage_area \
+			   	--localize-symbol=sw_sprintf \
+			   	--localize-symbol=sw_printf \
+			   	--localize-symbol=sw_malloc \
+			   	--localize-symbol=sw_free \
+			   	--localize-symbol=sw_realloc \
+			   	--localize-symbol=decode_data \
+			   	--localize-symbol=free_decoded_data \
+			   	--localize-symbol=process_otzapi \
+			   	--localize-symbol=update_response_len \
+			   	--localize-symbol=otz_release_data \
+			   	--localize-symbol=otz_encode_data \
+			   	--localize-symbol=sw_geterrno \
+			   	--localize-symbol=sw_seterrno \
+			   	--localize-symbol=map_to_ns \
+			   	--localize-symbol=unmap_from_ns \
+			   	--localize-symbol=tee_panic \
+			   	--localize-symbol=task_init \
+			   	--localize-symbol=task_exit \
+			   	--localize-symbol=is_pow_of_2 \
+			   	--localize-symbol=log_of_2 \
+			   	--localize-symbol=next_pow_of_2 \
+			   	--localize-symbol=change_endian \
+				$(build_dir)/kernel.o
+
+user_app: $(user-apps-objs-y)
+	if [ "$(user-apps-objs-y)" ]; then \
+		$(lib_ld) $(app_ldflags) -o $(app_build_dir)/user_app.o $(user-apps-objs-y) $(extra_app_ldflags) ; \
+		sudo cp $(app_build_dir)/user_app.o $(cur_dir)/user_app.o ;\
+	fi
+
+libc: $(device-file) $(libc-objs-y)
+	@echo "generating lib"
+ifeq ($(CONFIG_NEWLIB), y)	
+	@mkdir -p $(libc_build_dir)/tmp
+	cp $(newlib_lib_dir)/libc.a $(libc_build_dir)/tmp/libc.a
+ifeq ($(CONFIG_FFMPEG), y)		
+	cp $(newlib_lib_dir)/libm.a $(libc_build_dir)/tmp/libm.a	
+endif	
+	cd $(libc_build_dir)/tmp/; $(ar) x libc.a; 
+	if [ -f ${libc_build_dir}/tmp/lib_a-syscalls.o ]; then \
+	rm $(libc_build_dir)/tmp/lib_a-syscalls.o; \
+	fi
+ifeq ($(CONFIG_FFMPEG), y)			
+	cd $(libc_build_dir)/tmp/; $(ar) x libm.a
+endif	
+	cd $(libc_build_dir)/tmp/; $(ar) $(arflags) newlibc.a *.o
+				
+	$(lib_ld)  -o $(libc_build_dir)/libc.o $(libc-objs-y)  --whole-archive  $(libc_build_dir)/tmp/newlibc.a --no-whole-archive $(newlib_libgcc_file)   $(lib_ldflags)
+	$(sstrip) --strip-debug $(libc_build_dir)/libc.o
+else
+	$(lib_ld) $(lib_ldflags) -o $(libc_build_dir)/libc.o $(libc-objs-y)
+	$(sstrip) --strip-debug $(libc_build_dir)/libc.o
+endif	
+	
+	sudo cp $(libc_build_dir)/libc.o $(cur_dir)/libc.o
+
+ifeq ($(CONFIG_CRYPTO), y)
+modules_crypto: $(device-file)
+endif
+
+ifeq ($(CONFIG_FFMPEG), y)
+modules_ffmpeg: $(device-file)
+endif
+
+
+modules:$(device-file) $(module-objs-y) rename_objects
+
+rename_objects:
+	mkdir -p $(fs_mnt_dir)
+
+$(build_dir)/%.dep: $(src_dir)/%.S
+	@echo "gen dep file"
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (as-dep)    $(subst $(build_dir)/,,$@)")
+	$(V)echo -n `dirname $@`/ > $@
+	$(V)$(as) $(kern_asflags) -I`dirname $<` -MM $< >> $@
+
+$(build_dir)/%.dep: $(src_dir)/%.c
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (cc-dep)    $(subst $(build_dir)/,,$@)")
+	$(V)echo -n `dirname $@`/ > $@
+	$(V)$(cc) $(kern_cflags) -I`dirname $<` -MM $< >> $@
+
+$(build_dir)/%.o: $(src_dir)/%.S
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (as)        $(subst $(build_dir)/,,$@)")
+	$(V)$(as) $(kern_asflags) -I`dirname $<` -c $< -o $@
+
+$(build_dir)/%.o: $(build_dir)/%.S
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (as)        $(subst $(build_dir)/,,$@)")
+	$(V)$(as) $(kern_asflags) -I`dirname $<` -c $< -o $@
+
+$(build_dir)/%.o: $(src_dir)/%.c
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (cc)        $(subst $(build_dir)/,,$@)")
+	$(V)$(cc) $(kern_cflags) -I`dirname $<` -c $< -o $@
+
+$(build_dir)/%.o: $(build_dir)/%.c
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (cc)        $(subst $(build_dir)/,,$@)")
+	$(V)$(cc) $(kern_cflags) -I`dirname $<` -c $< -o $@
+
+$(modules_build_dir)/%.dep: $(src_dir)/%.S
+	@echo "gen app-dep file"
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (as-dep)    $(subst $(modules_build_dir)/,,$@)")
+	$(V)echo -n `dirname $@`/ > $@
+	$(as) $(app_asflags) -I`dirname $<` -MM $< >> $@
+
+$(modules_build_dir)/%.dep: $(src_dir)/%.c
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (cc-dep)    $(subst $(modules_build_dir)/,,$@)")
+	$(V)echo -n `dirname $@`/ > $@
+	$(V)$(cc) $(app_cflags) -I`dirname $<` -MM $< >> $@
+
+$(modules_build_dir)/%.o: $(src_dir)/%.S
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (as)        $(subst $(modules_build_dir)/,,$@)")
+	$(V)$(as) $(app_asflags) -I`dirname $<` -c $< -o $@
+
+$(modules_build_dir)/%.o: $(modules_build_dir)/%.S
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (as)        $(subst $(modules_build_dir)/,,$@)")
+	$(V)$(as) $(app_asflags) -I`dirname $<` -c $< -o $@
+
+$(modules_build_dir)/%.o: $(src_dir)/%.c
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (cc)        $(subst $(modules_build_dir)/,,$@)")
+	$(V)$(cc) $(app_cflags) -I`dirname $<` -c $< -o $@
+
+$(modules_build_dir)/%.o: $(modules_build_dir)/%.c
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (cc)        $(subst $(modules_build_dir)/,,$@)")
+	$(V)$(cc) $(app_cflags) -I`dirname $<` -c $< -o $@
+
+$(libc_build_dir)/%.dep: $(src_dir)/%.S
+	@echo "gen libc-dep file"
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (as-dep)    $(subst $(libc_build_dir)/,,$@)")
+	$(V)echo -n `dirname $@`/ > $@
+	$(as) $(libc_asflags) -I`dirname $<` -MM $< >> $@
+
+$(libc_build_dir)/%.dep: $(src_dir)/%.c
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (cc-dep)    $(subst $(libc_build_dir)/,,$@)")
+	$(V)echo -n `dirname $@`/ > $@
+	$(V)$(cc) $(libc_cflags) -I`dirname $<` -MM $< >> $@
+
+$(libc_build_dir)/%.o: $(src_dir)/%.S
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (as)        $(subst $(libc_build_dir)/,,$@)")
+	$(V)$(as) $(libc_asflags) -I`dirname $<` -c $< -o $@
+
+$(libc_build_dir)/%.o: $(libc_build_dir)/%.S
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (as)        $(subst $(libc_build_dir)/,,$@)")
+	$(V)$(as) $(libc_asflags) -I`dirname $<` -c $< -o $@
+
+$(libc_build_dir)/%.o: $(src_dir)/%.c
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (cc)        $(subst $(libc_build_dir)/,,$@)")
+	$(V)$(cc) $(libc_cflags) -I`dirname $<` -c $< -o $@
+
+$(libc_build_dir)/%.o: $(libc_build_dir)/%.c
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (cc)        $(subst $(libc_build_dir)/,,$@)")
+	$(V)$(cc) $(libc_cflags) -I`dirname $<` -c $< -o $@
+
+$(app_build_dir)/%.dep: $(src_dir)/%.S
+	@echo "gen app-dep file"
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (as-dep)    $(subst $(app_build_dir)/,,$@)")
+	$(V)echo -n `dirname $@`/ > $@
+	$(as) $(app_asflags) -I`dirname $<` -MM $< >> $@
+
+$(app_build_dir)/%.dep: $(src_dir)/%.c
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (cc-dep)    $(subst $(app_build_dir)/,,$@)")
+	$(V)echo -n `dirname $@`/ > $@
+	$(V)$(cc) $(app_cflags) -I`dirname $<` -MM $< >> $@
+
+$(app_build_dir)/%.o: $(src_dir)/%.S
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (as)        $(subst $(app_build_dir)/,,$@)")
+	$(V)$(as) $(app_asflags) -I`dirname $<` -c $< -o $@
+
+$(app_build_dir)/%.o: $(app_build_dir)/%.S
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (as)        $(subst $(app_build_dir)/,,$@)")
+	$(V)$(as) $(app_asflags) -I`dirname $<` -c $< -o $@
+
+$(app_build_dir)/%.o: $(src_dir)/%.c
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (cc)        $(subst $(app_build_dir)/,,$@)")
+	$(V)$(cc) $(app_cflags) -I`dirname $<` -c $< -o $@
+
+$(app_build_dir)/%.o: $(app_build_dir)/%.c
+	$(V)mkdir -p `dirname $@`
+	$(if $(V), @echo " (cc)        $(subst $(app_build_dir)/,,$@)")
+	$(V)$(cc) $(app_cflags) -I`dirname $<` -c $< -o $@
+
+
+define sed-y
+        "/^->/{s:->#\(.*\):/* \1 */:; \
+        s:^->\([^ ]*\) [\$$#]*\([^ ]*\) \(.*\):#define \1 \2 /* \3 */:; \
+        s:->::; p;}"
+endef
+
+#Making asm-offset.h
+$(cpu_arch_dir)/asm-offsets.s: $(cpu_arch_dir)/asm-offsets.c
+	$(V)$(cc) $(kern_cflags) -S -I`dirname $<` -c $< -o $@
+
+$(offsets-file): $(cpu_arch_dir)/asm-offsets.s
+	sed -ne $(sed-y) $< >> $@
+
+# Rule for "make clean"
+.PHONY: clean
+clean:
+ifeq ($(build_dir),$(cur_dir)/build)
+	$(if $(V), @echo " (rm)        $(build_dir)")
+	$(V)rm -rf $(build_dir)
+endif
+
+ifeq ($(libc_build_dir),$(cur_dir)/libc_build)
+	$(if $(V), @echo " (rm)        $(libc_build_dir)")
+	$(V)rm -rf $(libc_build_dir)
+	$(V)rm -rf $(cur_dir)/libc.o
+endif
+ifeq ($(app_build_dir),$(cur_dir)/app_build)
+	$(if $(V), @echo " (rm)        $(app_build_dir)")
+	$(V)rm -rf $(app_build_dir)
+	$(V)rm -rf $(cur_dir)/user_app.o
+endif
+ifeq ($(modules_build_dir),$(cur_dir)/modules_build)
+	$(if $(V), @echo " (rm)        $(modules_build_dir)")
+	$(V)rm -rf $(modules_build_dir)
+endif
+
+	rm -f $(offsets-file)
+	rm -f $(cpu_arch_dir)/asm-offsets.s; 
+	rm -f $(device-file)
+	rm -f $(cur_dir)/linker.ld
+
+.PHONY: tags
+tags:
+	$(V)ctags -R --c++-kinds=+p --fields=+iaS --extra=+q .
+	$(V)echo "Generating tags ..."
+
+.PHONY: cscope
+cscope:
+	$(V)echo "Generating cscope database ..."
+	$(V)find ./ -name "*.[CHSchs]" > cscope.files
+	$(V)cscope -bqk

@@ -1,0 +1,48 @@
+diff -pruN linux-3-3-8-zynq7-sierra/arch/arm/mach-zynq/platsmp.c linux-3-3-8-zynq7-sierra-smp/arch/arm/mach-zynq/platsmp.c
+--- linux-3-3-8-zynq7-sierra/arch/arm/mach-zynq/platsmp.c	2013-06-10 17:38:31.286730941 +0530
++++ linux-3-3-8-zynq7-sierra-smp/arch/arm/mach-zynq/platsmp.c	2013-06-10 18:17:39.667844269 +0530
+@@ -29,6 +29,28 @@
+ 
+ static DEFINE_SPINLOCK(boot_lock);
+ 
++#define SMC_CMD_CPU1BOOT    (-4)
++
++static u32 sw_send_smc(u32 cmd, u32 arg1, u32 arg2, u32 arg3)
++{
++
++    register u32 reg0 __asm__("r0") = cmd;
++    register u32 reg1 __asm__("r1") = arg1;
++    register u32 reg2 __asm__("r2") = arg2;
++    register u32 reg3 __asm__("r3") = arg3;
++
++    __asm__ volatile (
++		".arch_extension sec\n\t"
++        "smc    0\n"
++        : "+r"(reg0), "+r"(reg1), "+r"(reg2), "+r"(reg3)
++    );
++
++    return reg0;
++
++}
++
++
++
+ /* Store pointer to ioremap area which points to address 0x0 */
+ static u8 __iomem *zero;
+ 
+@@ -137,11 +159,15 @@ static int __cpuinit zynq_boot_secondary
+ 	 */
+ 	spin_lock(&boot_lock);
+ 
++#if 0
+ 	ret = zynq_cpun_start(virt_to_phys(secondary_startup), cpu);
+ 	if (ret) {
+ 		spin_unlock(&boot_lock);
+ 		return -1;
+ 	}
++#endif
++
++	sw_send_smc(SMC_CMD_CPU1BOOT,cpu,virt_to_phys(secondary_startup),0);
+ 
+ 	/*
+ 	 * now the secondary core is starting up let it run its

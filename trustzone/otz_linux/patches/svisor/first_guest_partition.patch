@@ -1,0 +1,19 @@
+--- linux-otz-2/arch/arm/mach-vexpress/v2m.c	2013-03-12 19:15:03.000000000 +0530
++++ linux-otz/arch/arm/mach-vexpress/v2m.c	2013-03-15 14:45:18.000000000 +0530
+@@ -80,6 +80,7 @@
+ {
+ 	u32 scctrl;
+ 
++#if 0
+ 	/*
+ 	 * Try architected timers first. If they are not available,
+ 	 * fallback to TWD and versatile sched_clock.
+@@ -87,7 +88,7 @@
+ 	if (!arch_timer_register_setup(v2m_arch_timer_setup,
+ 				       v2m_arch_timer_teardown))
+ 		return;
+-
++#endif
+ 	/* vexpress_twd_base is assigned in the tile code */
+ 	versatile_local_timer_init(vexpress_twd_base);
+ 

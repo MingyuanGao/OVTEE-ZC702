@@ -1,0 +1,31 @@
+From 2e9ac8eb0a3003d7b505044e7e57cdf89ed78706 Mon Sep 17 00:00:00 2001
+From: Javier Gonzalez <javigon.napster@gmail.com>
+Date: Wed, 19 Jun 2013 12:00:59 +0200
+Subject: [PATCH 3/4]  zynq: disable UART in a TEE extended linux
+
+    Disables UART in a Xilinx TEE extended linux.
+    This makes it easier to interact with a muli guest environment running
+    in the same board.
+---
+ arch/arm/common/gic.c |    5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/arch/arm/common/gic.c b/arch/arm/common/gic.c
+index d4a9a45..4f81ce3 100644
+--- a/arch/arm/common/gic.c
++++ b/arch/arm/common/gic.c
+@@ -164,6 +164,11 @@ static void gic_unmask_irq(struct irq_data *d)
+ {
+ 	u32 mask = 1 << (gic_irq(d) % 32);
+ 
++   if(gic_irq(d) == 82) {
++       printk("gic unmask irq; do nothing for uart\n");
++       return;
++   }
++
+ 	raw_spin_lock(&irq_controller_lock);
+ 	if (gic_arch_extn.irq_unmask)
+ 		gic_arch_extn.irq_unmask(d);
+-- 
+1.7.9.5
+

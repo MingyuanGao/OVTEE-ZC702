@@ -1,0 +1,494 @@
+diff -pruN linux-3-3-8-zynq7/arch/arm/kernel/head.S linux-3-3-8-zynq7-l2cache/arch/arm/kernel/head.S
+--- linux-3-3-8-zynq7/arch/arm/kernel/head.S	2013-06-05 20:13:54.681434998 +0530
++++ linux-3-3-8-zynq7-l2cache/arch/arm/kernel/head.S	2013-06-05 20:18:17.090486502 +0530
+@@ -627,3 +627,102 @@ ENTRY(secure_write)
+ 	smc #0
+ 	bx  lr
+ ENDPROC(secure_write)
++   
++ENTRY(secure_l2c_setup1)
++   mov r3, r2
++   mov r2, r1
++   mov r1, r0
++   ldr r0, =-22 /* smc call id - l2c setup 1 */
++   smc #0
++   bx  lr
++ENDPROC(secure_l2c_setup1)
++
++ENTRY(secure_l2c_setup2)
++   mov r3, r2
++   mov r2, r1
++   mov r1, r0
++   ldr r0, =-23 /* smc call id - l2c setup 2 */
++   smc #0
++   bx  lr
++ENDPROC(secure_l2c_setup2)
++
++ENTRY(secure_l2c_ctrl_update)
++   mov r1, r0
++   ldr r0, =-21 /* smc call id - l2c ctrl write */
++   smc #0
++   bx  lr
++ENDPROC(secure_l2c_ctrl_update)
++
++ENTRY(secure_l2c_filter_setup)
++   mov r2,r1
++   mov r1,r0
++   ldr r0, =-20 /* smc call id - l2c filter setup */
++   smc #0
++   bx  lr
++ENDPROC(secure_l2c_filter_setup)
++
++ENTRY(secure_inv_all)
++   ldr r0, =-24 /* smc call id - Invalidate all cache */
++   smc #0
++   bx  lr
++ENDPROC(secure_inv_all)
++
++ENTRY(secure_clean_all)
++   ldr r0, =-27 /* smc call id - Clean all cache */
++   smc #0
++   bx  lr
++ENDPROC(secure_clean_all)
++
++ENTRY(secure_inv_line)
++   mov r1, r0
++   ldr r0, =-36 /* smc call id - Invalidate line */
++   smc #0
++   bx  lr
++ENDPROC(secure_inv_line)
++
++ENTRY(secure_clean_line)
++   mov r1,r0
++   ldr r0, =-38 /* smc call id - Clean line */
++   smc #0
++   bx  lr
++ENDPROC(secure_clean_line)
++
++ENTRY(secure_inv_range)
++   mov r2, r1
++   mov r1, r0
++   ldr r0, =-35 /* smc call id - Invalidate cache range */
++   smc #0
++   bx  lr
++ENDPROC(secure_inv_range)
++
++ENTRY(secure_clean_range)
++   mov r2, r1
++   mov r1, r0
++   ldr r0, =-37 /* smc call id - Clean cache range */
++   smc #0
++   bx  lr
++ENDPROC(secure_clean_range)
++
++ENTRY(secure_flush_all)
++   ldr r0, =-26 /* smc call id - Flush all cache */
++   smc #0
++   bx  lr
++ENDPROC(secure_flush_all)
++
++ENTRY(secure_flush_line)
++   mov r1, r0
++   ldr r0, =-39 /* smc call id - Flush line */
++   smc #0
++   bx  lr
++ENDPROC(secure_flush_line)
++
++ENTRY(secure_flush_range)
++   mov r2, r1
++   mov r1, r0
++   ldr r0, =-28 /* smc call id - Invalidate cache range */
++   smc #0
++   bx  lr
++ENDPROC(secure_flush_range)
++
++
++
+diff -pruN linux-3-3-8-zynq7/arch/arm/mm/cache-l2x0.c linux-3-3-8-zynq7-l2cache/arch/arm/mm/cache-l2x0.c
+--- linux-3-3-8-zynq7/arch/arm/mm/cache-l2x0.c	2013-02-19 05:28:34.000000000 +0530
++++ linux-3-3-8-zynq7-l2cache/arch/arm/mm/cache-l2x0.c	2013-06-05 20:49:45.156522994 +0530
+@@ -29,6 +29,30 @@
+ 
+ #define CACHE_LINE_SIZE		32
+ 
++#define SW_SMC_L2_CACHE 
++#ifdef SW_SMC_L2_CACHE
++
++extern secure_l2c_ctrl_update(u32 ctrl_val);
++extern secure_l2c_setup1(u32 tag_latency, u32 data_latency, u32 prefetch);
++extern secure_l2c_setup2(u32 power, u32 aux_ctrl, u32 aux_mask);
++extern secure_l2c_filter_setup(u32 filter_start, u32 filter_end);
++
++extern void secure_inv_all(void);
++extern void secure_clean_all(void);
++extern void secure_flush_all(void);
++extern void secure_inv_range(u32 start, u32 end);
++extern void secure_clean_range(u32 start, u32 end);
++extern void secure_flush_range(u32 start, u32 end);
++extern void secure_inv_line(u32 addr);
++extern void secure_clean_line(u32 addr);
++extern void secure_flush_line(u32 addr);
++
++static u32 sw_aux_ctrl, sw_aux_mask;
++static u32 sw_tag_latency, sw_data_latency, sw_power,sw_prefetch;
++static u32 sw_filter_start, sw_filter_end, sw_filter_init;
++
++#endif
++
+ static void __iomem *l2x0_base;
+ static DEFINE_RAW_SPINLOCK(l2x0_lock);
+ static u32 l2x0_way_mask;	/* Bitmask of active ways */
+@@ -76,15 +100,23 @@ static inline void cache_sync(void)
+ static inline void l2x0_clean_line(unsigned long addr)
+ {
+ 	void __iomem *base = l2x0_base;
++#ifdef SW_SMC_L2_CACHE_OPS
++	secure_clean_line(addr);
++#else
+ 	cache_wait(base + L2X0_CLEAN_LINE_PA, 1);
+ 	writel_relaxed(addr, base + L2X0_CLEAN_LINE_PA);
++#endif
+ }
+ 
+ static inline void l2x0_inv_line(unsigned long addr)
+ {
+ 	void __iomem *base = l2x0_base;
++#ifdef SW_SMC_L2_CACHE_OPS
++	secure_inv_line(addr);
++#else
+ 	cache_wait(base + L2X0_INV_LINE_PA, 1);
+ 	writel_relaxed(addr, base + L2X0_INV_LINE_PA);
++#endif
+ }
+ 
+ #if defined(CONFIG_PL310_ERRATA_588369) || defined(CONFIG_PL310_ERRATA_727915)
+@@ -112,19 +144,27 @@ static inline void l2x0_flush_line(unsig
+ {
+ 	void __iomem *base = l2x0_base;
+ 
++#ifdef SW_SMC_L2_CACHE_OPS
++	secure_flush_line(addr);
++#else
+ 	/* Clean by PA followed by Invalidate by PA */
+ 	cache_wait(base + L2X0_CLEAN_LINE_PA, 1);
+ 	writel_relaxed(addr, base + L2X0_CLEAN_LINE_PA);
+ 	cache_wait(base + L2X0_INV_LINE_PA, 1);
+ 	writel_relaxed(addr, base + L2X0_INV_LINE_PA);
++#endif
+ }
+ #else
+ 
+ static inline void l2x0_flush_line(unsigned long addr)
+ {
+ 	void __iomem *base = l2x0_base;
++#ifdef SW_SMC_L2_CACHE_OPS
++	secure_flush_line(addr);
++#else
+ 	cache_wait(base + L2X0_CLEAN_INV_LINE_PA, 1);
+ 	writel_relaxed(addr, base + L2X0_CLEAN_INV_LINE_PA);
++#endif
+ }
+ #endif
+ 
+@@ -139,11 +179,15 @@ static void l2x0_cache_sync(void)
+ 
+ static void __l2x0_flush_all(void)
+ {
++#ifdef SW_SMC_L2_CACHE_OPS
++	secure_flush_all();
++#else
+ 	debug_writel(0x03);
+ 	writel_relaxed(l2x0_way_mask, l2x0_base + L2X0_CLEAN_INV_WAY);
+ 	cache_wait_way(l2x0_base + L2X0_CLEAN_INV_WAY, l2x0_way_mask);
+ 	cache_sync();
+ 	debug_writel(0x00);
++#endif
+ }
+ 
+ static void l2x0_flush_all(void)
+@@ -160,11 +204,15 @@ static void l2x0_clean_all(void)
+ {
+ 	unsigned long flags;
+ 
+-	/* clean all ways */
+ 	raw_spin_lock_irqsave(&l2x0_lock, flags);
++#ifdef SW_SMC_L2_CACHE_OPS
++	secure_clean_all();
++#else
++	/* clean all ways */
+ 	writel_relaxed(l2x0_way_mask, l2x0_base + L2X0_CLEAN_WAY);
+ 	cache_wait_way(l2x0_base + L2X0_CLEAN_WAY, l2x0_way_mask);
+ 	cache_sync();
++#endif
+ 	raw_spin_unlock_irqrestore(&l2x0_lock, flags);
+ }
+ 
+@@ -174,11 +222,15 @@ static void l2x0_inv_all(void)
+ 
+ 	/* invalidate all ways */
+ 	raw_spin_lock_irqsave(&l2x0_lock, flags);
++#ifdef SW_SMC_L2_CACHE_OPS
++	secure_inv_all();
++#else
+ 	/* Invalidating when L2 is enabled is a nono */
+ 	BUG_ON(readl(l2x0_base + L2X0_CTRL) & L2X0_CTRL_EN);
+ 	writel_relaxed(l2x0_way_mask, l2x0_base + L2X0_INV_WAY);
+ 	cache_wait_way(l2x0_base + L2X0_INV_WAY, l2x0_way_mask);
+ 	cache_sync();
++#endif
+ 	raw_spin_unlock_irqrestore(&l2x0_lock, flags);
+ }
+ 
+@@ -188,6 +240,9 @@ static void l2x0_inv_range(unsigned long
+ 	unsigned long flags;
+ 
+ 	raw_spin_lock_irqsave(&l2x0_lock, flags);
++#ifdef SW_SMC_L2_CACHE_OPS
++	secure_inv_range(start, end);
++#else
+ 	if (start & (CACHE_LINE_SIZE - 1)) {
+ 		start &= ~(CACHE_LINE_SIZE - 1);
+ 		debug_writel(0x03);
+@@ -218,6 +273,7 @@ static void l2x0_inv_range(unsigned long
+ 	}
+ 	cache_wait(base + L2X0_INV_LINE_PA, 1);
+ 	cache_sync();
++#endif
+ 	raw_spin_unlock_irqrestore(&l2x0_lock, flags);
+ }
+ 
+@@ -232,6 +288,9 @@ static void l2x0_clean_range(unsigned lo
+ 	}
+ 
+ 	raw_spin_lock_irqsave(&l2x0_lock, flags);
++#ifdef SW_SMC_L2_CACHE_OPS
++	secure_clean_range(start, end);
++#else
+ 	start &= ~(CACHE_LINE_SIZE - 1);
+ 	while (start < end) {
+ 		unsigned long blk_end = start + min(end - start, 4096UL);
+@@ -248,6 +307,7 @@ static void l2x0_clean_range(unsigned lo
+ 	}
+ 	cache_wait(base + L2X0_CLEAN_LINE_PA, 1);
+ 	cache_sync();
++#endif
+ 	raw_spin_unlock_irqrestore(&l2x0_lock, flags);
+ }
+ 
+@@ -262,6 +322,9 @@ static void l2x0_flush_range(unsigned lo
+ 	}
+ 
+ 	raw_spin_lock_irqsave(&l2x0_lock, flags);
++#ifdef SW_SMC_L2_CACHE_OPS
++	secure_flush_range(start,end);
++#else
+ 	start &= ~(CACHE_LINE_SIZE - 1);
+ 	while (start < end) {
+ 		unsigned long blk_end = start + min(end - start, 4096UL);
+@@ -280,6 +343,7 @@ static void l2x0_flush_range(unsigned lo
+ 	}
+ 	cache_wait(base + L2X0_CLEAN_INV_LINE_PA, 1);
+ 	cache_sync();
++#endif
+ 	raw_spin_unlock_irqrestore(&l2x0_lock, flags);
+ }
+ 
+@@ -288,9 +352,13 @@ static void l2x0_disable(void)
+ 	unsigned long flags;
+ 
+ 	raw_spin_lock_irqsave(&l2x0_lock, flags);
++#ifdef SW_SMC_L2_CACHE
++	secure_l2c_ctrl_update(0);
++#else
+ 	__l2x0_flush_all();
+ 	writel_relaxed(0, l2x0_base + L2X0_CTRL);
+ 	dsb();
++#endif
+ 	raw_spin_unlock_irqrestore(&l2x0_lock, flags);
+ }
+ 
+@@ -329,6 +397,7 @@ void __init l2x0_init(void __iomem *base
+ 	int way_size_shift = L2X0_WAY_SIZE_SHIFT;
+ 	const char *type;
+ 
++#ifndef SW_SMC_L2_CACHE
+ 	l2x0_base = base;
+ 	if (cache_id_part_number_from_dt)
+ 		cache_id = cache_id_part_number_from_dt;
+@@ -373,6 +442,7 @@ void __init l2x0_init(void __iomem *base
+ 		type = "L2x0 series";
+ 		break;
+ 	}
++#endif
+ 
+ 	l2x0_way_mask = (1 << ways) - 1;
+ 
+@@ -418,9 +488,12 @@ void __init l2x0_init(void __iomem *base
+ 		outer_cache.disable = l2x0_disable;
+ 	}
+ 
++	printk(KERN_INFO "L2 cache controller enabled\n");
++#ifndef SW_SMC_L2_CACHE
+ 	printk(KERN_INFO "%s cache controller enabled\n", type);
+ 	printk(KERN_INFO "l2x0: %d ways, CACHE_ID 0x%08x, AUX_CTRL 0x%08x, Cache size: %d B\n",
+ 			ways, cache_id, aux, l2x0_size);
++#endif
+ }
+ 
+ #ifdef CONFIG_OF
+@@ -566,29 +639,49 @@ static void __init pl310_of_setup(const 
+ 	u32 filter[2] = { 0, 0 };
+ 
+ 	of_property_read_u32_array(np, "arm,tag-latency", tag, ARRAY_SIZE(tag));
+-	if (tag[0] && tag[1] && tag[2])
++	if (tag[0] && tag[1] && tag[2]){
++#ifndef SW_SMC_L2_CACHE
+ 		writel_relaxed(
+ 			((tag[0] - 1) << L2X0_LATENCY_CTRL_RD_SHIFT) |
+ 			((tag[1] - 1) << L2X0_LATENCY_CTRL_WR_SHIFT) |
+ 			((tag[2] - 1) << L2X0_LATENCY_CTRL_SETUP_SHIFT),
+ 			l2x0_base + L2X0_TAG_LATENCY_CTRL);
++#else
++		sw_tag_latency =	((tag[0] - 1) << L2X0_LATENCY_CTRL_RD_SHIFT) |
++			((tag[1] - 1) << L2X0_LATENCY_CTRL_WR_SHIFT) |
++			((tag[2] - 1) << L2X0_LATENCY_CTRL_SETUP_SHIFT);
++#endif
++	}
+ 
+ 	of_property_read_u32_array(np, "arm,data-latency",
+ 				   data, ARRAY_SIZE(data));
+-	if (data[0] && data[1] && data[2])
++	if (data[0] && data[1] && data[2]){
++#ifndef SW_SMC_L2_CACHE
+ 		writel_relaxed(
+ 			((data[0] - 1) << L2X0_LATENCY_CTRL_RD_SHIFT) |
+ 			((data[1] - 1) << L2X0_LATENCY_CTRL_WR_SHIFT) |
+ 			((data[2] - 1) << L2X0_LATENCY_CTRL_SETUP_SHIFT),
+ 			l2x0_base + L2X0_DATA_LATENCY_CTRL);
++#else
++		sw_data_latency = ((data[0] - 1) << L2X0_LATENCY_CTRL_RD_SHIFT) |
++			((data[1] - 1) << L2X0_LATENCY_CTRL_WR_SHIFT) |
++			((data[2] - 1) << L2X0_LATENCY_CTRL_SETUP_SHIFT);
++#endif
++	}
+ 
+ 	of_property_read_u32_array(np, "arm,filter-ranges",
+ 				   filter, ARRAY_SIZE(filter));
+ 	if (filter[1]) {
++#ifndef SW_SMC_L2_CACHE
+ 		writel_relaxed(ALIGN(filter[0] + filter[1], SZ_1M),
+ 			       l2x0_base + L2X0_ADDR_FILTER_END);
+ 		writel_relaxed((filter[0] & ~(SZ_1M - 1)) | L2X0_ADDR_FILTER_EN,
+ 			       l2x0_base + L2X0_ADDR_FILTER_START);
++#else
++		sw_filter_init = 1;
++		sw_filter_end = ALIGN(filter[0] + filter[1], SZ_1M);
++		sw_filter_start = (filter[0] & ~(SZ_1M - 1)) | L2X0_ADDR_FILTER_EN;
++#endif
+ 	}
+ }
+ 
+@@ -596,7 +689,7 @@ static void __init pl310_save(void)
+ {
+ 	u32 l2x0_revision = readl_relaxed(l2x0_base + L2X0_CACHE_ID) &
+ 		L2X0_CACHE_ID_RTL_MASK;
+-
++#ifndef SW_SMC_L2_CACHE
+ 	l2x0_saved_regs.tag_latency = readl_relaxed(l2x0_base +
+ 		L2X0_TAG_LATENCY_CTRL);
+ 	l2x0_saved_regs.data_latency = readl_relaxed(l2x0_base +
+@@ -605,6 +698,12 @@ static void __init pl310_save(void)
+ 		L2X0_ADDR_FILTER_END);
+ 	l2x0_saved_regs.filter_start = readl_relaxed(l2x0_base +
+ 		L2X0_ADDR_FILTER_START);
++#else
++	l2x0_saved_regs.tag_latency = sw_tag_latency;
++	l2x0_saved_regs.data_latency = sw_data_latency;
++	l2x0_saved_regs.filter_end = sw_filter_end;
++	l2x0_saved_regs.filter_start = sw_filter_start;
++#endif
+ 
+ 	if (l2x0_revision >= L2X0_CACHE_ID_RTL_R2P0) {
+ 		/*
+@@ -612,12 +711,19 @@ static void __init pl310_save(void)
+ 		 */
+ 		l2x0_saved_regs.prefetch_ctrl = readl_relaxed(l2x0_base +
+ 			L2X0_PREFETCH_CTRL);
++#ifdef SW_SMC_L2_CACHE
++		sw_prefetch = l2x0_saved_regs.prefetch_ctrl;
++#endif
+ 		/*
+ 		 * From r3p0, there is Power control register
+ 		 */
+-		if (l2x0_revision >= L2X0_CACHE_ID_RTL_R3P0)
++		if (l2x0_revision >= L2X0_CACHE_ID_RTL_R3P0){
+ 			l2x0_saved_regs.pwr_ctrl = readl_relaxed(l2x0_base +
+ 				L2X0_POWER_CTRL);
++#ifdef SW_SMC_L2_CACHE
++			sw_power = l2x0_saved_regs.pwr_ctrl;
++#endif
++		}
+ 	}
+ }
+ 
+@@ -784,6 +890,18 @@ int __init l2x0_of_init(u32 aux_val, u32
+ 	const struct l2x0_of_data *data;
+ 	struct resource res;
+ 
++#ifdef SW_SMC_L2_CACHE
++	sw_aux_ctrl = 0;
++	sw_aux_mask = 0;
++	sw_tag_latency = 0;
++	sw_data_latency = 0;
++	sw_power = 0;
++	sw_prefetch = 0;
++	sw_filter_start = 0;
++	sw_filter_end = 0;
++	sw_filter_init = 0;
++#endif
++
+ 	np = of_find_matching_node(NULL, l2x0_ids);
+ 	if (!np)
+ 		return -ENODEV;
+@@ -814,10 +932,40 @@ int __init l2x0_of_init(u32 aux_val, u32
+ 		data->save();
+ 
+ 	of_init = true;
+-	l2x0_init(l2x0_base, aux_val, aux_mask);
++	/*l2x0_init(l2x0_base, aux_val, aux_mask);*/
++#ifdef SW_SMC_L2_CACHE
++   sw_aux_mask = aux_mask ;
++   sw_aux_ctrl = aux_val;
++
++   secure_l2c_setup1(sw_tag_latency, sw_data_latency, sw_prefetch);
++
++   if(sw_filter_init){
++       secure_l2c_filter_setup(sw_filter_start, sw_filter_end);
++   }
++
++   printk("Aux ctrl val 0x%08x Aux ctrl val 0x%08x\n",sw_aux_ctrl, sw_aux_mask);
++   secure_l2c_setup2(sw_power, sw_aux_ctrl, sw_aux_mask);
++#endif
++
++   l2x0_init(l2x0_base, aux_val, aux_mask);
++#ifdef SW_SMC_L2_CACHE 
++    static u32 sw_dbg_val;
++    sw_dbg_val = readl_relaxed(l2x0_base +  L2X0_TAG_LATENCY_CTRL);
++    printk("SW_DBG: tag latency = 0x%08x\n",sw_dbg_val);
++    sw_dbg_val = readl_relaxed(l2x0_base +  L2X0_DATA_LATENCY_CTRL);
++    printk("SW_DBG: data latency = 0x%08x\n",sw_dbg_val);
++    sw_dbg_val = readl_relaxed(l2x0_base +  L2X0_ADDR_FILTER_END);
++    printk("SW_DBG: filter end = 0x%08x\n",sw_dbg_val);
++    sw_dbg_val = readl_relaxed(l2x0_base +  L2X0_ADDR_FILTER_START);
++    printk("SW_DBG: filter start = 0x%08x\n",sw_dbg_val);
++    sw_dbg_val = readl_relaxed(l2x0_base +  L2X0_ADDR_FILTER_END);
++    printk("SW_DBG: filter end = 0x%08x\n",sw_dbg_val);
++    sw_dbg_val = readl_relaxed(l2x0_base + L2X0_AUX_CTRL);
++    printk("SW_DBG: aux ctrl = 0x%08x\n",sw_dbg_val);
+ 
+ 	memcpy(&outer_cache, &data->outer_cache, sizeof(outer_cache));
+ 
+ 	return 0;
+ }
+ #endif
++#endif

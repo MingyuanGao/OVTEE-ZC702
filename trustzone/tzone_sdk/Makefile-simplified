@@ -1,0 +1,102 @@
+# Master makefile for TrustZone SDK
+
+###
+#
+#CONFIG_NEON_SUPPORT:
+#	Enables Neon support for executing neon based intrinsics and the instructions.
+#
+#TIMER_NOT_DEFINED
+#	Disables the secure timer support.
+#
+#CONFIG_SW_MULTICORE:
+#	Enables support for booting SMP kernels(Linux SMP for example)
+#	in non secure world. 
+#	Number of cores to be enabled is selected by MAX_CORES macro.
+#
+#CONFIG_SW_NOBOOTLOADER:
+#	Enables support for directly running the secure world OS on
+#	target without running a bootloader. A typical example is
+#	fastmodel emulation targets. Currently this is used to handle
+#	the multicore booting.
+#
+#CONFIG_CACHE_L2X0
+#	Enables the L2 cache controller support in Secure OS. 
+#	Currently it is to co-operate to work along with guest. 
+#	for e.g. Few PL310 controller operations are supported 
+#	from secure world.
+#
+#CONFIG_CACHE_PL310
+#	Enables the PL310 L2 Cache controller support.
+#
+###
+
+SIERRA_PRODUCT = Sierra TEE
+SIERRA_MAJOR_VERSION = 1
+SIERRA_MINOR_VERSION = 7
+SIERRA_PATCH_LEVEL = 2
+SIERRA_BUILD_NO = 3
+VERSION_FILE=$(SDK_PATH)/include/version.h
+
+export OTZONE_BUILD:= y
+export CONFIG_MULTI_GUESTS_SUPPORT:=n
+export CONFIG_ANDROID_GUEST:=n
+export NON_SECURE_BOOTWRAPPER_SUPPORT:=y
+export CONFIG_NEON_SUPPORT :=n
+export CONFIG_KIM :=n
+
+export SDK_PATH:= $(CURDIR)
+export PACKAGE_DIR:= $(SDK_PATH)/../package
+export PACKAGE_PATCHES_DIR:=$(PACKAGE_DIR)/patches
+export PACKAGE_STORAGE_DIR:=$(PACKAGE_DIR)/storage
+export PACKAGE_BUILD_DIR:=$(PACKAGE_DIR)/build
+export CONFIG_PACKAGE_FILE:=$(PACKAGE_DIR)/config.package
+export ANDROID_PATH:= /home/pub/ov_android/android
+
+
+export KDIR := $(SDK_PATH)/../../kernel/first/linux-xlnx
+export KERNEL_BUILT_DIR := $(SDK_PATH)/../../kernel/first/linux-xlnx
+NS_IMAGE := $(SDK_PATH)/../../bootwrapper/first/normal.elf
+
+-include $(CONFIG_PACKAGE_FILE)
+
+export BOARD:= zynq7
+export ARM_CPU:= CORTEX_A9
+export ARM_ARCH:= ARMV7
+
+.PHONY: all
+
+all: $(VERSION_FILE)
+	cp -f $(NS_IMAGE) $(SDK_PATH)/bin/normal.elf;
+	$(MAKE) -C $(SDK_PATH)/otz_api CROSS_COMPILE=$(CROSS_COMPILE_LINARO)
+	#$(MAKE) -C $(SDK_PATH)/ns_client_apps
+	$(MAKE) -C $(SDK_PATH)/otz_driver CROSS_COMPILE=$(CROSS_COMPILE_LINARO)
+	$(MAKE) -C $(SDK_PATH)/../package CROSS_COMPILE=$(CROSS_COMPILE_LINARO)
+	$(MAKE) -C $(SDK_PATH)/sierratee CROSS_COMPILE=$(CROSS_COMPILE_SOURCERY) 
+
+boot:
+	$(MAKE) -C $(SDK_PATH)/sierratee boot
+
+clean:
+	$(MAKE) -C $(SDK_PATH)/../package clean
+	$(MAKE) -C $(SDK_PATH)/sierratee clean
+	#$(MAKE) -C $(SDK_PATH)/ns_client_apps clean
+	$(MAKE) -C $(SDK_PATH)/otz_api clean
+	$(MAKE) -C $(SDK_PATH)/otz_driver clean
+	rm -f bin/*.elf
+	rm -f bin/*.bin
+	rm -f bin/*.ko
+	rm -f lib/*.so
+	rm -f $(VERSION_FILE)
+ 
+$(VERSION_FILE):
+	@(printf '#define SIERRA_PRODUCT_NAME "%s"\n' \
+		'$(SIERRA_PRODUCT)')>>  $@.tmp
+	@(printf '#define SIERRA_MAJOR_VERSION "%s"\n' \
+		'$(SIERRA_MAJOR_VERSION)')>>  $@.tmp
+	@(printf '#define SIERRA_MINOR_VERSION "%s"\n' \
+		'$(SIERRA_MINOR_VERSION)')>>  $@.tmp
+	@(printf '#define SIERRA_PATCH_LEVEL "%s"\n' \
+		'$(SIERRA_PATCH_LEVEL)')>>  $@.tmp
+	@(printf '#define SIERRA_BUILD_NO "%s"\n' \
+		'$(SIERRA_BUILD_NO)')>>  $@.tmp
+	@cmp -s $@ $@.tmp && rm -f $@.tmp || mv -f $@.tmp $@

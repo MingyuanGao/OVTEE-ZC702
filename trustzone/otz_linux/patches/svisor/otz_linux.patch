@@ -1,0 +1,90 @@
+Index: boot_guest2/RTSM/VE_V7/model.lds
+===================================================================
+--- boot_guest2/RTSM/VE_V7/model.lds	(revision 642)
++++ boot_guest2/RTSM/VE_V7/model.lds	(working copy)
+@@ -24,7 +24,7 @@
+ INPUT(../../../linux-otz-2/arch/arm/boot/Image)
+ INPUT(./boot.o)
+ 
+-PHYS_OFFSET = 0x88000000;
++PHYS_OFFSET = 0x84000000;
+ 
+ SECTIONS
+ {
+Index: boot_guest2/RTSM/VE_V7/boot.S
+===================================================================
+--- boot_guest2/RTSM/VE_V7/boot.S	(revision 642)
++++ boot_guest2/RTSM/VE_V7/boot.S	(working copy)
+@@ -46,7 +46,8 @@
+     @
+     @ Secondary CPUs (following the RealView SMP booting protocol)
+     @
+-    ldr    r1, =0x88000000 + 0x800000 - 0x100
++#ldr    r1, =0x88000000 + 0x800000 - 0x100
++    ldr    r1, =0x84000000 + 0x800000 - 0x100
+     adr    r2, 1f
+     ldmia  r2, {r3 - r7}         @ move the code to a location
+     stmia  r1, {r3 - r7}         @ less likely to be overridden
+@@ -88,7 +89,9 @@
+     @ ATAG_CMDLINE
+     .long    (1f - .) >> 2
+     .long    0x54410009
+-    .asciz    "root=/dev/ram0 rw initrd=0x88d00000,32M ramdisk_size=32768  mem=128M console=ttyAMA0 nosmp"
++#    .asciz    "root=/dev/ram0 rw initrd=0x88d00000,32M ramdisk_size=32768  mem=128M console=ttyAMA0 nosmp"
++	.asciz    "root=/dev/ram0 rw initrd=0x84800000,16M ramdisk_size=16384	mem=64M console=ttyAMA0 nosmp"
++#    .asciz    "root=/dev/ram0 rw mem=64M console=ttyAMA0 nosmp"
+     .align    2
+ 1:
+     @ ATAG_NONE
+Index: Makefile
+===================================================================
+--- Makefile	(revision 642)
++++ Makefile	(working copy)
+@@ -7,7 +7,7 @@
+ #  Building on Linux
+ export DIST_DIR:=$(CURDIR)
+ 
+-export MULTIPLE_GUESTS_SUPPORT:=n
++export MULTIPLE_GUESTS_SUPPORT:=y
+ 
+ #export FAST_MODEL_CONFIG:=EB_V6_V7
+ export FAST_MODEL_CONFIG:=VE_V7
+Index: boot/RTSM/VE_V7/boot.S
+===================================================================
+--- boot/RTSM/VE_V7/boot.S	(revision 642)
++++ boot/RTSM/VE_V7/boot.S	(working copy)
+@@ -88,7 +88,7 @@
+     @ ATAG_CMDLINE
+     .long    (1f - .) >> 2
+     .long    0x54410009
+-    .asciz    "root=/dev/mmcblk0 rootwait ip=none mem=128M console=ttyAMA0 nosmp"
++    .asciz    "root=/dev/mmcblk0 rootwait ip=none mem=64M console=ttyAMA0 nosmp"
+     .align    2
+ 1:
+ 
+Index: patches/otz_hyp_linux2.patch
+===================================================================
+--- patches/otz_hyp_linux2.patch	(revision 642)
++++ patches/otz_hyp_linux2.patch	(working copy)
+@@ -6,7 +6,7 @@
+  #define PLAT_PHYS_OFFSET		UL(0x60000000)
+  #elif defined(CONFIG_VEXPRESS_EXTENDED_MEMORY_MAP)
+ -#define PLAT_PHYS_OFFSET		UL(0x80000000)
+-+#define PLAT_PHYS_OFFSET		UL(0x88000000)
+++#define PLAT_PHYS_OFFSET		UL(0x84000000)
+  
+  #ifdef CONFIG_SPARSEMEM
+  #define MAX_PHYSMEM_BITS	36
+@@ -20,9 +20,9 @@
+ -   zreladdr-y	:= 0x80008000
+ -params_phys-y	:= 0x80000100
+ -initrd_phys-y	:= 0x80800000
+-+   zreladdr-y	:= 0x88008000
+-+params_phys-y	:= 0x88000100
+-+initrd_phys-y	:= 0x88800000
+++   zreladdr-y	:= 0x84008000
+++params_phys-y	:= 0x84000100
+++initrd_phys-y	:= 0x84800000
+  endif
+  endif
+  

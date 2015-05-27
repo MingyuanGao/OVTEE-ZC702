@@ -1,0 +1,126 @@
+From ecd366e5e4827281ed9886eef7deb73952179f93 Mon Sep 17 00:00:00 2001
+From: Radhey Shyam Pandey <radheys@xilinx.com>
+Date: Tue, 16 Apr 2013 17:54:08 +0530
+Subject: [LINUX PATCH] Xilinx: ARM : Support for Zynq Base TRD.
+
+[Zynq Base TRD patch for 14.5 (2013.1)]
+
+[This patch should be applied on top of xilinx-14.5-build-trd
+tag of git://github.com/Xilinx/linux-xlnx.git tree]
+
+- Modified mousedev driver to adjust mouse sensitivity.
+
+Signed-off-by: Radhey Shyam Pandey <radheys@xilinx.com>
+---
+ drivers/input/mousedev.c |   57 +++++++++++++++++++++++++++++++++++++++++++--
+ 1 files changed, 54 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/input/mousedev.c b/drivers/input/mousedev.c
+index 4c842c3..2e8be08 100644
+--- a/drivers/input/mousedev.c
++++ b/drivers/input/mousedev.c
+@@ -51,6 +51,7 @@ module_param(tap_time, uint, 0644);
+ MODULE_PARM_DESC(tap_time, "Tap time for touchpads in absolute mode (msecs)");
+ 
+ struct mousedev_hw_data {
++	int x_accum, y_accum;
+ 	int dx, dy, dz;
+ 	int x, y;
+ 	int abs_event;
+@@ -122,6 +123,44 @@ static void mixdev_close_devices(void);
+ #define fx(i)  (mousedev->old_x[(mousedev->pkt_count - (i)) & 03])
+ #define fy(i)  (mousedev->old_y[(mousedev->pkt_count - (i)) & 03])
+ 
++static int downsample_n = 100;
++static int downsample_d = 350;
++
++static ssize_t get_sensitivity_attr(struct device *dev,
++				struct device_attribute *devattr,
++				char *buf)
++{
++	return sprintf(buf, "%d\n", downsample_n);
++}
++
++static ssize_t set_sensitivity_attr(struct device *dev,
++				struct device_attribute *attr,
++				const char *buf, size_t count)
++{
++	int err, val;
++	/*The usage of simple_strtoul or strict_strtoul is not preferred. */
++	/*Thus,kstrtoul should be used. */
++	err = kstrtoul(buf, 10, (unsigned long *)&val);
++	if (err)
++		return err;
++
++	downsample_n = val;
++
++	return count;
++}
++
++static DEVICE_ATTR(sensitivity, S_IWUSR | S_IRUGO,
++	get_sensitivity_attr, set_sensitivity_attr);
++
++static struct attribute *mousedev_attr[] = {
++	&dev_attr_sensitivity.attr,
++	NULL
++};
++
++static struct attribute_group mousedev_attrs = {
++	.attrs = mousedev_attr,
++};
++
+ static void mousedev_touchpad_event(struct input_dev *dev,
+ 				    struct mousedev *mousedev,
+ 				    unsigned int code, int value)
+@@ -132,7 +171,6 @@ static void mousedev_touchpad_event(struct input_dev *dev,
+ 	switch (code) {
+ 
+ 	case ABS_X:
+-
+ 		fx(0) = value;
+ 		if (mousedev->touch && mousedev->pkt_count >= 2) {
+ 			size = input_abs_get_max(dev, ABS_X) -
+@@ -209,11 +247,19 @@ static void mousedev_rel_event(struct mousedev *mousedev,
+ {
+ 	switch (code) {
+ 	case REL_X:
+-		mousedev->packet.dx += value;
++		mousedev->packet.x_accum += value * downsample_n;
++		mousedev->packet.dx += mousedev->packet.x_accum / downsample_d;
++		mousedev->packet.x_accum -=
++			(mousedev->packet.x_accum / downsample_d) *
++			 downsample_d;
+ 		break;
+ 
+ 	case REL_Y:
+-		mousedev->packet.dy -= value;
++		mousedev->packet.y_accum += value * downsample_n;
++		mousedev->packet.dy -= mousedev->packet.y_accum / downsample_d;
++		mousedev->packet.y_accum -=
++			(mousedev->packet.y_accum / downsample_d) *
++			downsample_d;
+ 		break;
+ 
+ 	case REL_WHEEL:
+@@ -980,6 +1026,9 @@ static int mousedev_connect(struct input_handler *handler,
+ 		return error;
+ 	}
+ 
++	if (sysfs_create_group(&dev->dev.kobj, &mousedev_attrs))
++		pr_err("could not create mouse control file interface\n");
++
+ 	return 0;
+ }
+ 
+@@ -987,6 +1036,8 @@ static void mousedev_disconnect(struct input_handle *handle)
+ {
+ 	struct mousedev *mousedev = handle->private;
+ 
++	sysfs_remove_group(&mousedev->dev.parent->kobj, &mousedev_attrs);
++
+ 	mixdev_remove_device(mousedev);
+ 	mousedev_destroy(mousedev);
+ }
+-- 
+1.7.7.4
+

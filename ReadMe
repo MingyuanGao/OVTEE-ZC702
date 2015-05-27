@@ -1,0 +1,19 @@
+Modifications to Open Virtualization for Xilinx ZC702: 
+
+I. In the top dir, a Makefile was added to replace the build script.
+
+II. The dts was modified to include the following kernel args:
+	console=tty0 console=ttyPS0,115200n8 root=/dev/mmcblk0p2 rw mem=768M earlyprintk
+
+III. Modification to trustzone/tzone_sdk/Makefile
+	The ns_client_apps was changed to be not compiled.
+	dir otz_api was changed to use linaro tool chain.
+	dir otz_driver was changed to use linaro tool chain.
+	dir package was changed to use linaro tool chain.
+	dir sierratee still uses sourcery tool chain. 
+
+IV. Modification to trustzone/tzone_sdk/otz_api/Makefile
+	The -msoft-float was deleted from the ccflag.
+
+V. Modification to trustzone/tzone_sdk/otz_driver/Makefile
+	The -msoft-float was deleted from the EXTRA_CFLAGS.

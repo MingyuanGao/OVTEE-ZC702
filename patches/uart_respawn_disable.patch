@@ -1,0 +1,11 @@
+--- a/etc/inittab	2013-03-08 16:10:15.000000000 +0530
++++ b/etc/inittab	2013-03-08 13:54:04.000000000 +0530
+@@ -5,7 +5,7 @@
+ # Start an askfirst shell on the serial ports
+ # and the tty0 for when the video is being used
+ 
+-ttyPS0::respawn:-/bin/ash
++#ttyPS0::respawn:-/bin/ash
+ tty0::respawn:-/bin/ash
+ 
+ # What to do when restarting the init process

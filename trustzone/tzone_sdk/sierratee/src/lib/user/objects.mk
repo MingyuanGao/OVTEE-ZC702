@@ -1,0 +1,11 @@
+lib-user-objs-y+=libc_sos.o
+lib-user-objs-y+=otz_tee_arith_api.o
+lib-user-objs-y+=otz_tee_mem_mgmt.o
+lib-user-objs-y+=sw_printf.o
+lib-user-objs-y+=sw_user_app_api.o
+lib-user-objs-y+=sw_user_heap.o
+lib-user-objs-y+=sw_user_errno.o
+lib-user-objs-y+=sw_strerror.o
+lib-user-objs-y+=sw_syscalls.o
+lib-user-objs-$(CONFIG_NEWLIB)+=syscalls.o
+lib-crypto-objs-y+=otz_tee_crypto_api.o

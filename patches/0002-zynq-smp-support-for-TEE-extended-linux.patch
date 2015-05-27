@@ -1,0 +1,65 @@
+From f2daf67b2bcf8b9d21e25f1da69ae6c0902a2e24 Mon Sep 17 00:00:00 2001
+From: Javier Gonzalez <javigon.napster@gmail.com>
+Date: Wed, 19 Jun 2013 11:59:00 +0200
+Subject: [PATCH 2/4] zynq: smp support for TEE extended linux
+
+    Enables SMP support for a Xilinx patched kernel with TEE security
+    extensions
+
+    Retrieved from SierraWare's Open Virtualization kernel_first_smp.patch
+---
+ arch/arm/mach-zynq/platsmp.c |   26 ++++++++++++++++++++++++++
+ 1 file changed, 26 insertions(+)
+
+diff --git a/arch/arm/mach-zynq/platsmp.c b/arch/arm/mach-zynq/platsmp.c
+index ef05183..044acb3 100644
+--- a/arch/arm/mach-zynq/platsmp.c
++++ b/arch/arm/mach-zynq/platsmp.c
+@@ -29,6 +29,28 @@
+ 
+ static DEFINE_SPINLOCK(boot_lock);
+ 
++#define SMC_CMD_CPU1BOOT    (-4)
++
++static u32 sw_send_smc(u32 cmd, u32 arg1, u32 arg2, u32 arg3)
++{
++
++    register u32 reg0 __asm__("r0") = cmd;
++    register u32 reg1 __asm__("r1") = arg1;
++    register u32 reg2 __asm__("r2") = arg2;
++    register u32 reg3 __asm__("r3") = arg3;
++
++    __asm__ volatile (
++		".arch_extension sec\n\t"
++        "smc    0\n"
++        : "+r"(reg0), "+r"(reg1), "+r"(reg2), "+r"(reg3)
++    );
++
++    return reg0;
++
++}
++
++
++
+ /* Store pointer to ioremap area which points to address 0x0 */
+ static u8 __iomem *zero;
+ 
+@@ -137,11 +159,15 @@ static int __cpuinit zynq_boot_secondary(unsigned int cpu,
+ 	 */
+ 	spin_lock(&boot_lock);
+ 
++#if 0
+ 	ret = zynq_cpun_start(virt_to_phys(secondary_startup), cpu);
+ 	if (ret) {
+ 		spin_unlock(&boot_lock);
+ 		return -1;
+ 	}
++#endif
++
++	sw_send_smc(SMC_CMD_CPU1BOOT,cpu,virt_to_phys(secondary_startup),0);
+ 
+ 	/*
+ 	 * now the secondary core is starting up let it run its
+-- 
+1.7.9.5
+

@@ -1,0 +1,78 @@
+# Refer Documentation/README.sierratee for details
+
+# Config file for Versatile Express RS 1 board 
+CONFIG_VE_BOARD=y
+
+### TEE and guest deployment configuration ###
+# CONFIG_SW_DEDICATED_TEE is not set
+#CONFIG_MULTI_GUESTS_SUPPORT is not set
+#CONFIG_SW_BL is not set
+
+### Features configuration ###
+CONFIG_SW_LIB_SUPPORT=y
+#CONFIG_KIM is not set
+CONFIG_GUI_SUPPORT=y
+#Elf loader  requires Filesystem support
+CONFIG_SHELL=y
+#TOUCH_SUPPORT is not set
+#TIMER_NOT_DEFINED is not set
+
+### SMP based configuration ###
+#CONFIG_SW_MULTICORE is not set
+#CONFIG_SW_NOBOOTLOADER is not set
+
+### L2 Cache configuration ###
+#CONFIG_CACHE_L2X0 is not set
+#CONFIG_CACHE_PL310 is not set
+
+### Flush cache on return from Secure ###
+#CONFIG_FLUSH_SMC_RET is not set
+
+### Test configuration ###
+#CONFIG_TEST_SUITE=y
+#CONFIG_TEST_TASKS=y
+
+### Boot Svisor 
+#CONFIG_BOOT_SVISOR=y
+
+TARGET_ASMFLAGS= \
+  -DCONFIG_VE_BOARD=1 \
+  -DCONFIG_SCU=1 \
+  -DCONFIG_GUI_SUPPORT=1 \
+  -DCONFIG_SHELL=1 \
+  -DCONFIG_SW_LIB_SUPPORT=1 \
+#  -DCONFIG_TEST_SUITE=1 \
+#  -DCONFIG_TEST_TASKS=1 \
+#  -DCONFIG_BOOT_SVISOR=1 \
+#  -DCONFIG_KIM \
+#  -DCONFIG_NEON_SUPPORT=1 \
+#  -DTOUCH_SUPPORT=1 \
+#  -DCONFIG_MULTI_GUESTS_SUPPORT=1 \
+#  -DCONFIG_SW_DEDICATED_TEE=1 \
+#  -DCONFIG_SW_BL=1 \
+#  -DCONFIG_SW_MULTICORE=1 \
+#  -DCONFIG_SW_NOBOOTLOADER=1 \
+#  -DCONFIG_CACHE_L2X0=1 \
+#  -DCONFIG_CACHE_PL310=1 \
+#  -DCONFIG_FLUSH_SMC_RET=1 \
+
+TARGET_CCFLAGS= \
+  -DCONFIG_VE_BOARD=1 \
+  -DCONFIG_SCU=1 \
+  -DCONFIG_GUI_SUPPORT=1 \
+  -DCONFIG_SHELL=1 \
+  -DCONFIG_SW_LIB_SUPPORT=1 \
+#  -DCONFIG_TEST_SUITE=1 \
+#  -DCONFIG_TEST_TASKS=1 \
+#  -DCONFIG_BOOT_SVISOR=1 \
+#  -DCONFIG_KIM \
+#  -DCONFIG_NEON_SUPPORT=1 \
+#  -DTOUCH_SUPPORT=1 \
+#  -DCONFIG_MULTI_GUESTS_SUPPORT=1 \
+#  -DCONFIG_SW_DEDICATED_TEE=1 \
+#  -DCONFIG_SW_BL=1 \
+#  -DCONFIG_SW_MULTICORE=1 \
+#  -DCONFIG_SW_NOBOOTLOADER=1 \
+#  -DCONFIG_CACHE_L2X0=1 \
+#  -DCONFIG_CACHE_PL310=1 \
+#  -DCONFIG_FLUSH_SMC_RET=1 \

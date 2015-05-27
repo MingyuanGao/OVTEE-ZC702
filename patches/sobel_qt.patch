@@ -1,0 +1,374 @@
+diff -Naur sobel_qt_orig/hw_ctrl/hwi/hwi.c sobel_qt/hw_ctrl/hwi/hwi.c
+--- sobel_qt_orig/hw_ctrl/hwi/hwi.c	2012-08-01 03:08:18.000000000 +0530
++++ sobel_qt/hw_ctrl/hwi/hwi.c	2012-10-19 15:59:02.000000000 +0530
+@@ -792,12 +792,18 @@
+     int map_len = 0xF00;
+     int fd = open("/dev/mem", O_RDWR);
+ 
++#ifdef NONSECURE_HW_ACCESS
+     unsigned char* cvc_base = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+     if(cvc_base == MAP_FAILED)
+     {
+         perror("Mapping memory for absolute memory access failed.\n");
+         return;
+     }
++#else
++    unsigned char *cvc_base;
++    cvc_base = PhysicalAddress;
++
++#endif
+ 
+ 
+     if(enable)
+@@ -852,12 +858,17 @@
+     int map_len = 0xF00;
+     int fd = open("/dev/mem", O_RDWR);
+ 
++#ifdef NONSECURE_HW_ACCESS
+     unsigned char* cvc_base = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+     if(cvc_base == MAP_FAILED)
+     {
+         perror("Mapping memory for absolute memory access failed.\n");
+         return;
+     }
++#else
++    unsigned char *cvc_base;
++    cvc_base = PhysicalAddress;
++#endif
+ 
+     REG_WRITE(cvc_base, CVC_L0_WIDTH       ,winWidth-1);
+     REG_WRITE(cvc_base, CVC_L0_H_POSITION  ,hwi_screenWidth-1-(hwi_screenWidth-winWidth));
+diff -Naur sobel_qt_orig/hw_ctrl/hwi/udriver.c sobel_qt/hw_ctrl/hwi/udriver.c
+--- sobel_qt_orig/hw_ctrl/hwi/udriver.c	2012-08-01 03:08:18.000000000 +0530
++++ sobel_qt/hw_ctrl/hwi/udriver.c	2012-10-19 15:57:58.000000000 +0530
+@@ -108,6 +108,7 @@
+ 	int fd = open( "/dev/mem", O_RDWR);
+ 	unsigned char* virtual_addr;
+ 
++#ifdef NONSECURE_HW_ACCESS
+ 	///////// Configure CVC /////////////
+ 	virtual_addr = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+ 	if(virtual_addr == MAP_FAILED)
+@@ -116,7 +117,12 @@
+ 		return;
+ 	}
+ 
++
+ 	DEBUG_Printf ("TPG_BASE mapping successful :\n0x%x to 0x%x, size = %d\n ", (int )PhysicalAddress, (int)virtual_addr, map_len );
++#else
++	virtual_addr = PhysicalAddress;
++#endif
++
+ 
+ 	// sanity check can done for cvc (if its already doing what was intended last time ? )
+ 	if (layer_id == 0)
+@@ -144,13 +150,17 @@
+ 	int map_len = 0xF00;
+ 	int fd = open( "/dev/mem", O_RDWR);
+ 
++#ifdef NONSECURE_HW_ACCESS
+ 	unsigned char* cvc_base = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+ 
+ 	if(cvc_base == MAP_FAILED)
+ 	{
+ 		perror("Mapping memory for absolute memory access failed.\n");
+ 	}
+-
++#else
++	unsigned char *cvc_base;
++	cvc_base = PhysicalAddress;
++#endif
+ 
+ 	if (layer_id ==0)
+ 	{
+@@ -177,6 +187,7 @@
+ 	int map_len = 0xF00;
+ 	int fd = open( "/dev/mem", O_RDWR);
+ 
++#ifdef NONSECURE_HW_ACCESS
+ 		unsigned char* cvc_base = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+ 
+ 		//check if it worked
+@@ -187,6 +198,11 @@
+ 		}
+ 
+ 		DEBUG_Printf ("TPG_BASE mapping successful :\n0x%x to 0x%x, size = %d\n ", (int )PhysicalAddress, (int)cvc_base, map_len );
++#else
++		unsigned char *cvc_base;
++		cvc_base = PhysicalAddress;
++
++#endif
+ 
+ 		if(layer_id ==0)
+ 		{
+@@ -214,6 +230,7 @@
+ 	int map_len = 0xF00;
+ 	int fd = open( "/dev/mem", O_RDWR);
+ 
++#ifdef NONSECURE_HW_ACCESS
+ 	unsigned char* cvc_base = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+ 
+ 	if(cvc_base == MAP_FAILED)
+@@ -221,6 +238,10 @@
+ 		perror("Mapping memory for absolute memory access failed.\n");
+ 		return;
+ 	}
++#else
++	unsigned char *cvc_base;
++	cvc_base = PhysicalAddress;
++#endif
+ 
+ 	if(layer_id ==0)
+ 	{
+@@ -250,6 +271,7 @@
+ 	int map_len = 0xF00;
+ 	int fd = open( "/dev/mem", O_RDWR);
+ 
++#ifdef NONSECURE_HW_ACCESS
+ 	unsigned char* cvc_base = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+ 
+ 	if(cvc_base == MAP_FAILED)
+@@ -257,6 +279,10 @@
+ 		perror("Mapping memory for absolute memory access failed.\n");
+ 		return;
+ 	}
++#else
++	unsigned char *cvc_base;
++	cvc_base = PhysicalAddress;
++#endif
+ 
+ 	if(layer_id ==0)
+ 	{
+@@ -287,6 +313,7 @@
+ 	int map_len = 0xF00;
+ 	int fd = open( "/dev/mem", O_RDWR);
+ 
++#ifdef NONSECURE_HW_ACCESS
+     unsigned char* cvc_base = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+ 
+     IN0();
+@@ -299,6 +326,10 @@
+ 	}
+ 
+ 	DEBUG_Printf ("CVC Base mapping successful :\n0x%x to 0x%x, size = %d\n ", (int )PhysicalAddress, (int)cvc_base, map_len );
++#else
++	unsigned char *cvc_base;
++	cvc_base = PhysicalAddress;
++#endif
+ 
+     REG_WRITE(cvc_base, CVC_L0_CTRL        	, 0x00000000);
+     REG_WRITE(cvc_base, CVC_L1_CTRL        	, 0x00000000);  // lAYER_1_EN =1
+@@ -378,6 +409,8 @@
+ 	int vSyncH_start, vSyncH_end; // vSync offset in cycles.
+ //	int fSync_v_start, fSync_h_start = 0;
+ 	int fd = open("/dev/mem", O_RDWR);
++
++#ifdef NONSECURE_HW_ACCESS
+ 	unsigned char* timebase_base = (unsigned char*) mmap(NULL, map_len,
+ 			PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t) PhysicalAddress);
+ 
+@@ -386,6 +419,10 @@
+ 		perror("Mapping memory for VTC access failed.\n");
+ 		return;
+ 	}
++#else
++	unsigned char *timebase_base;
++	timebase_base = PhysicalAddress;
++#endif
+ 
+ 	DEBUG_Printf ("Time_BASE mapping successful :\n0x%x to 0x%x, size = %d\n ", (int )PhysicalAddress, (int)timebase_base, map_len );
+ 
+@@ -431,6 +468,7 @@
+ 	int map_len = 0x20;
+ 	int fd = open( "/dev/mem", O_RDWR);
+ 
++#ifdef NONSECURE_HW_ACCESS
+     unsigned char* tpg_base_address = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+ 
+     if(tpg_base_address == MAP_FAILED)
+@@ -438,6 +476,10 @@
+ 		perror("Mapping memory for absolute memory access failed.\n");
+ 		return;
+ 	}
++#else
++    unsigned char *tpg_base_address;
++    tpg_base_address = PhysicalAddress;
++#endif
+ 
+ 	REG_WRITE(tpg_base_address,TPG_PATTERN,pattern);
+ 
+@@ -461,6 +503,7 @@
+ 	int map_len = 0x20;
+ 	int fd = open( "/dev/mem", O_RDWR);
+ 
++#ifdef NONSECURE_HW_ACCESS
+ 	unsigned char* clk_det_base = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+ 
+ 	if(clk_det_base == MAP_FAILED)
+@@ -468,6 +511,10 @@
+ 		perror("Mapping memory for absolute memory access failed.\n");
+ 		return 0;
+ 	}
++#else
++	unsigned char *clk_det_base;
++	clk_det_base = PhysicalAddress;
++#endif
+ 
+ 	// Set the sampling rate
+ 	REG_WRITE(clk_det_base,CLK_DET_SAMPLING_COUNT, 0x047868C0);
+@@ -510,12 +557,17 @@
+ 		return;
+ 	}
+ 
++#ifdef NONSECURE_HW_ACCESS
+ 	perf_base = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+ 	if(perf_base == MAP_FAILED)
+ 	{
+ 		perror("Mapping memory for absolute memory access failed for performance monitor HP0.\n");
+ 		return;
+ 	}
++#else
++	perf_base = PhysicalAddress;
++#endif
++
+ #if 0
+ 	// Set the counter such that it takes sample every one second (i.e. 150000000 cycles)
+ 	REG_WRITE(perf_base,PERF_SAMPLE_RATE, PERF_SAMPLE_VALUE);
+@@ -586,12 +638,17 @@
+ 		return;
+ 	}
+ 
++#ifdef NONSECURE_HW_ACCESS
+ 	perf_base = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+ 	if(perf_base == MAP_FAILED)
+ 	{
+ 		perror("Mapping memory for absolute memory access failed for performance monitor HP0.\n");
+ 		return;
+ 	}
++#else
++	perf_base = PhysicalAddress;
++#endif
++
+ 	// Load the sample rate and enable sampling.
+ 	REG_WRITE(perf_base,PERF_SAMPLE_CR, PERF_SMPL_LOAD);
+ 	REG_WRITE(perf_base,PERF_SAMPLE_CR, PERF_SMPL_DISABLE);
+@@ -638,12 +695,16 @@
+ 		return 0;	// returning count == 0
+ 	}
+ 
++#ifdef NONSECURE_HW_ACCESS
+ 	perf_base = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+ 	if(perf_base == MAP_FAILED)
+ 	{
+ 		perror("Mapping memory for absolute memory access failed for performance monitor HP0.\n");
+ 		return 0; // returning count == 0
+ 	}
++#else
++	perf_base = PhysicalAddress;
++#endif
+ 
+ 	count = REG_READ(perf_base,rd_wr_offset);
+ 
+@@ -660,6 +721,7 @@
+ 	int map_len = 0xFF;
+ 	int fd = open( "/dev/mem", O_RDWR);
+ 
++#ifdef NONSECURE_HW_ACCESS
+ 	unsigned char* chr_resampler_base = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+ 
+ 	if(chr_resampler_base == MAP_FAILED)
+@@ -667,6 +729,10 @@
+ 	perror("Mapping memory for absolute memory access failed -- Chroma Resampler\n");
+ 	return;
+ 	}
++#else
++	unsigned char *chr_resampler_base;
++	chr_resampler_base = PhysicalAddress;
++#endif
+ 
+ 	//disable and soft reset the chroma resampler
+ 	REG_WRITE(chr_resampler_base,CRE_CR,0x80000000);
+@@ -686,6 +752,7 @@
+ 	int map_len = 0xFF;
+ 	int fd = open( "/dev/mem", O_RDWR);
+ 
++#ifdef NONSECURE_HW_ACCESS
+ 	unsigned char* chr_resampler_base = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+ 
+ 	if(chr_resampler_base == MAP_FAILED)
+@@ -693,6 +760,10 @@
+ 	perror("Mapping memory for absolute memory access failed -- Chroma Resampler\n");
+ 	return;
+ 	}
++#else
++	unsigned char *chr_resampler_base;
++	chr_resampler_base = PhysicalAddress;
++#endif
+ 
+ 	// clear error.
+ 	//REG_WRITE(chr_resampler_base,CRE_ERR,REG_READ(chr_resampler_base,CRE_ERR));
+@@ -711,6 +782,7 @@
+ 	int map_len = 0xFF;
+ 	int fd = open( "/dev/mem", O_RDWR);
+ 
++#ifdef NONSECURE_HW_ACCESS
+ 	unsigned char *yuv2rgb_base = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+ 
+ 	if(yuv2rgb_base == MAP_FAILED)
+@@ -718,6 +790,10 @@
+ 	perror("Mapping memory for absolute memory access failed -- Chroma Resampler\n");
+ 	return;
+ 	}
++#else
++	unsigned char *yuv2rgb_base;
++	yuv2rgb_base = PhysicalAddress;
++#endif
+ 
+ 	//disable and soft reset the YCRCB2RGB_CONVERTER
+ 	REG_WRITE(yuv2rgb_base,YUV2RGB_CR,0x80000000);
+@@ -735,6 +811,7 @@
+ 	int map_len = 0xFF;
+ 	int fd = open( "/dev/mem", O_RDWR);
+ 
++#ifdef NONSECURE_HW_ACCESS
+ 	unsigned char *yuv2rgb_base = (unsigned char*)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, (off_t)PhysicalAddress);
+ 
+ 	if(yuv2rgb_base == MAP_FAILED)
+@@ -742,6 +819,10 @@
+ 	perror("Mapping memory for absolute memory access failed -- Chroma Resampler\n");
+ 	return;
+ 	}
++#else
++	unsigned char *yuv2rgb_base;
++	yuv2rgb_base = PhysicalAddress;
++#endif
+ 
+ 	// clear error.
+ 	//REG_WRITE(yuv2rgb_base,CRE_ERR,REG_READ(yuv2rgb_base,YUV2RGB_ERR));
+diff -Naur sobel_qt_orig/hw_ctrl/hwi/udriver.h sobel_qt/hw_ctrl/hwi/udriver.h
+--- sobel_qt_orig/hw_ctrl/hwi/udriver.h	2012-08-01 03:08:18.000000000 +0530
++++ sobel_qt/hw_ctrl/hwi/udriver.h	2012-10-19 15:32:58.000000000 +0530
+@@ -81,9 +81,22 @@
+ #define IN0()	DEBUG_Printf(">> IN >> %s",__func__)
+ #define OUT0()	DEBUG_Printf("<< OUT << %s",__func__)
+ 
+-
++#ifdef NONSECURE_HW_ACCESS
+ #define REG_WRITE(addr, off, val) (*(volatile int*)(addr+off)=(val))
+ #define REG_READ(addr,off) (*(volatile int*)(addr+off))
++#else
++/* 
++ * This is a temporary workaround for the non secure hardware access failure 
++ * of the PL registers
++ */
++#define SECURE_READ 0x0f0006
++#define SECURE_WRITE 0x0f0007
++
++#define REG_WRITE(addr, off, val)  \
++	syscall(SECURE_WRITE, val, (addr + off));
++#define REG_READ(addr,off) \
++	syscall(SECURE_READ, (addr + off));
++#endif
+ 
+ 
+ enum Resolutions{

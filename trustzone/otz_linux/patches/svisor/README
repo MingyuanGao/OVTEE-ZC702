@@ -1,0 +1,11 @@
+1. Apply otz_linux.patch
+2. Copy linux-2.6.38.7.tar.bz2
+3. #make ; 
+4. Apply first_guest_partition.patch 
+5. #make clean; make;
+6. Copy fastmodel_ve_defconfig to arch/arm/configs of both 
+   linux guest directories.
+7. #make
+
+This is a temporary arrangement until we merge the linux guest changes
+for both trustzone based hypervisor and A15 based hypervisor.

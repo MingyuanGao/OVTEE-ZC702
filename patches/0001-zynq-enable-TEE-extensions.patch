@@ -1,0 +1,645 @@
+From 9e7776c76dd5fff589b5ae3a09ee4c17b77d6100 Mon Sep 17 00:00:00 2001
+From: Javier Gonzalez <javigon.napster@gmail.com>
+Date: Wed, 19 Jun 2013 11:55:13 +0200
+Subject: [PATCH 1/4] zynq: enable TEE extensions
+
+TEE extensions enable TrustZone in the ZC702 and allows Open
+Virtualization's Trustzone implementation to switch between
+"normal world" and "secure world"
+(ARM TrustZone ternminology)
+
+Retrieved from SierraWare's Open Virtualization kernel_first.patch
+---
+ arch/arm/boot/dts/zynq-zc702-base-trd.dts        |    2 +-
+ arch/arm/boot/dts/zynq-zc702.dts                 |    2 +-
+ arch/arm/kernel/head.S                           |   18 ++++++++++
+ arch/arm/mach-zynq/slcr.c                        |   26 ++++++++++----
+ arch/arm/mach-zynq/timer.c                       |   16 +++++++--
+ drivers/clk/clk-divider.c                        |   40 ++++++++++++++++++----
+ drivers/clk/zynq/clk.c                           |   25 +++++++++++---
+ drivers/dma/xilinx/xilinx_axidma.c               |   10 +++++-
+ drivers/dma/xilinx/xilinx_axivdma.c              |   14 ++++++--
+ drivers/hwmon/xilinx-xadcps.c                    |   38 +++++++++++++++++---
+ drivers/tty/serial/xilinx_uartps.c               |   36 ++++++++++++++++---
+ drivers/video/xylon/xylonfb/core/xylonfb-ioctl.c |   12 +++++++
+ drivers/video/xylon/xylonfb/core/xylonfb.c       |   14 ++++++++
+ 13 files changed, 222 insertions(+), 31 deletions(-)
+
+diff --git a/arch/arm/boot/dts/zynq-zc702-base-trd.dts b/arch/arm/boot/dts/zynq-zc702-base-trd.dts
+index df22472..8d1d9d5 100644
+--- a/arch/arm/boot/dts/zynq-zc702-base-trd.dts
++++ b/arch/arm/boot/dts/zynq-zc702-base-trd.dts
+@@ -12,7 +12,7 @@
+ 		reg = <0x00000000 0x40000000>;
+ 	};
+ 	chosen {
+-		bootargs = "console=tty0 console=ttyPS0,115200 root=/dev/ram rw ip=192.168.1.10:::255.255.255.0:ZC702:eth0 earlyprintk mem=768M";
++		bootargs = "console=tty0 console=ttyPS0,115200 root=/dev/ram rw initrd=0x800000,8M ip=192.168.1.10:::255.255.255.0:ZC702:eth0 earlyprintk mem=768M";
+ 		linux,stdout-path = "/amba@0/uart@E0001000";
+ 	};
+ 
+diff --git a/arch/arm/boot/dts/zynq-zc702.dts b/arch/arm/boot/dts/zynq-zc702.dts
+index 19e2780..cba8c97 100644
+--- a/arch/arm/boot/dts/zynq-zc702.dts
++++ b/arch/arm/boot/dts/zynq-zc702.dts
+@@ -12,7 +12,7 @@
+ 		reg = <0x00000000 0x40000000>;
+ 	};
+ 	chosen {
+-		bootargs = "console=ttyPS0,115200 root=/dev/ram rw ip=:::::eth0:dhcp earlyprintk";
++		bootargs = "console=ttyPS0,115200 root=/dev/ram rw initrd=0x800000,8M ip=:::::eth0:dhcp earlyprintk";
+ 		linux,stdout-path = "/amba@0/uart@E0001000";
+ 	};
+ 
+diff --git a/arch/arm/kernel/head.S b/arch/arm/kernel/head.S
+index 486a15a..da6129a 100644
+--- a/arch/arm/kernel/head.S
++++ b/arch/arm/kernel/head.S
+@@ -611,3 +611,21 @@ __pv_offset:
+ #endif
+ 
+ #include "head-common.S"
++
++.section ".text", "ax"
++/* Temporary Workarounds for non secure access failure */
++ENTRY(secure_read)
++	mov r1, r0
++	ldr r0, =-30  /* smc call id - read */
++.arch_extension sec
++	smc #0
++	bx  lr
++ENDPROC(secure_read)
++
++ENTRY(secure_write)
++	mov r2, r0
++	ldr r0, =-31 /* smc call id - write */
++.arch_extension sec
++	smc #0
++	bx  lr
++ENDPROC(secure_write)
+diff --git a/arch/arm/mach-zynq/slcr.c b/arch/arm/mach-zynq/slcr.c
+index 50a46afa..561add1 100644
+--- a/arch/arm/mach-zynq/slcr.c
++++ b/arch/arm/mach-zynq/slcr.c
+@@ -29,6 +29,15 @@
+ #include <linux/clk/zynq.h>
+ #include "common.h"
+ 
++#ifndef NONSECURE_HW_ACCESS
++#undef __raw_readl
++#undef __raw_writel
++#define __raw_readl(addr) \
++    secure_read(addr)
++#define __raw_writel(val, addr) \
++    secure_write(val, addr)
++#endif
++
+ #define DRIVER_NAME "xslcr"
+ 
+ #define XSLCR_LOCK			0x4   /* SLCR lock register */
+@@ -160,7 +169,10 @@
+ #define xslcr_writereg(offset, val)	__raw_writel(val, offset)
+ #define xslcr_readreg(offset)		__raw_readl(offset)
+ 
+-void __iomem *zynq_slcr_base;
++extern uint32_t secure_read(void *);
++extern void secure_write(uint32_t, void *);
++
++/* void __iomem *zynq_slcr_base; */
+ 
+ /**
+  * struct xslcr - slcr device data.
+@@ -2477,6 +2489,7 @@ module_init(xslcr_arch_init);
+ int __init xslcr_init(void)
+ {
+ 	struct device_node *np;
++	u32 slcr_va;
+ 
+ 	np = of_find_compatible_node(NULL, NULL, "xlnx,zynq-slcr");
+ 	if (!np) {
+@@ -2491,24 +2504,25 @@ int __init xslcr_init(void)
+ 		BUG();
+ 	}
+ 
+-	slcr->regs = of_iomap(np, 0);
++	slcr_va  = of_iomap(np, 0);
++	slcr->regs=0xf8000000;
++	
+ 	if (!slcr->regs) {
+ 		pr_err("%s: Unable to map I/O memory\n", __func__);
+ 		BUG();
+ 	}
+ 
+-	zynq_slcr_base = slcr->regs;
+ 
+ 	/* init periph_status based on the data from MIO control registers */
+ 	xslcr_get_mio_status();
+ 
++
+ 	/* unlock the SLCR so that registers can be changed */
+ 	xslcr_writereg(slcr->regs + XSLCR_UNLOCK, 0xDF0D);
+ 
+ 	pr_info("%s mapped to %p\n", DRIVER_NAME, slcr->regs);
+-
+-	zynq_clock_init(slcr->regs);
+-
++	zynq_clock_init(slcr_va);
++	
+ 	of_node_put(np);
+ 
+ 	return 0;
+diff --git a/arch/arm/mach-zynq/timer.c b/arch/arm/mach-zynq/timer.c
+index 9bef11c..28ebd42 100644
+--- a/arch/arm/mach-zynq/timer.c
++++ b/arch/arm/mach-zynq/timer.c
+@@ -24,6 +24,15 @@
+ #include <asm/smp_twd.h>
+ #include "common.h"
+ 
++#ifndef NONSECURE_HW_ACCESS
++#undef __raw_readl
++#undef __raw_writel
++#define __raw_readl(addr) \
++	secure_read(addr)
++#define __raw_writel(val, addr) \
++	secure_write(val, addr)
++#endif
++
+ /*
+  * This driver configures the 2 16-bit count-up timers as follows:
+  *
+@@ -95,6 +104,9 @@ struct xttcps_timer_clockevent {
+ #define to_xttcps_timer_clkevent(x) \
+ 		container_of(x, struct xttcps_timer_clockevent, ce)
+ 
++extern uint32_t secure_read(void *);
++extern void secure_write(uint32_t, void *);
++
+ /**
+  * xttcps_set_interval - Set the timer interval value
+  *
+@@ -417,8 +429,8 @@ static void __init xttcps_timer_init(struct device_node *timer)
+ 		BUG();
+ 	}
+ 
+-	zynq_ttc_setup_clocksource(clk, timer_baseaddr);
+-	zynq_ttc_setup_clockevent(clk, timer_baseaddr + 4, irq);
++	zynq_ttc_setup_clocksource(clk, 0xf8001008);
++	zynq_ttc_setup_clockevent(clk, 0xf8001004, irq);
+ 
+ #ifdef CONFIG_HAVE_ARM_TWD
+ 	twd_local_timer_of_register();
+diff --git a/drivers/clk/clk-divider.c b/drivers/clk/clk-divider.c
+index a9204c6..5577141 100644
+--- a/drivers/clk/clk-divider.c
++++ b/drivers/clk/clk-divider.c
+@@ -17,6 +17,33 @@
+ #include <linux/err.h>
+ #include <linux/string.h>
+ 
++#ifndef NONSECURE_HW_ACCESS
++extern uint32_t secure_read(void *);
++extern void secure_write(u32, void *);
++extern void __iomem *zynq_slcr_base1;
++
++static inline u32 sw_readl(void* addr)
++{
++	if(((u32)addr & 0xfffff000) == (u32)zynq_slcr_base1) { 
++    	return secure_read(0xf8000000 + ((u32)addr & 0xfff));
++	} 
++	else { 
++		return readl(addr); 
++	} 
++}
++
++static inline u32 sw_writel(u32 val,void* addr)
++{
++    if(((u32)addr & 0xfffff000) == (u32)zynq_slcr_base1) {
++        secure_write(val,0xf8000000 + ((u32)addr & 0xfff));
++    }
++    else {
++        writel(val,addr);
++    }
++}
++#endif
++
++
+ /*
+  * DOC: basic adjustable divider clock that cannot gate
+  *
+@@ -32,6 +59,8 @@
+ #define div_mask(d)	((1 << (d->width)) - 1)
+ #define is_power_of_two(i)	!(i & ~i)
+ 
++extern uint32_t secure_read(void *);
++
+ static unsigned int _get_table_maxdiv(const struct clk_div_table *table)
+ {
+ 	unsigned int maxdiv = 0;
+@@ -103,10 +132,9 @@ static unsigned long clk_divider_recalc_rate(struct clk_hw *hw,
+ {
+ 	struct clk_divider *divider = to_clk_divider(hw);
+ 	unsigned int div, val;
+-
+-	val = readl(divider->reg) >> divider->shift;
++	
++	val = sw_readl(divider->reg) >> divider->shift;
+ 	val &= div_mask(divider);
+-
+ 	div = _get_div(divider, val);
+ 	if (!div) {
+ 		WARN(1, "%s: Invalid divisor for clock %s\n", __func__,
+@@ -216,10 +244,10 @@ static int clk_divider_set_rate(struct clk_hw *hw, unsigned long rate,
+ 	if (divider->lock)
+ 		spin_lock_irqsave(divider->lock, flags);
+ 
+-	val = readl(divider->reg);
++	val = sw_readl(divider->reg);
+ 	val &= ~(div_mask(divider) << divider->shift);
+ 	val |= value << divider->shift;
+-	writel(val, divider->reg);
++	sw_writel(val, divider->reg);
+ 
+ 	if (divider->lock)
+ 		spin_unlock_irqrestore(divider->lock, flags);
+@@ -243,7 +271,7 @@ static struct clk *_register_divider(struct device *dev, const char *name,
+ 	struct clk_divider *div;
+ 	struct clk *clk;
+ 	struct clk_init_data init;
+-
++	
+ 	/* allocate the divider */
+ 	div = kzalloc(sizeof(struct clk_divider), GFP_KERNEL);
+ 	if (!div) {
+diff --git a/drivers/clk/zynq/clk.c b/drivers/clk/zynq/clk.c
+index b97d0e5f..8e0f18f 100644
+--- a/drivers/clk/zynq/clk.c
++++ b/drivers/clk/zynq/clk.c
+@@ -20,6 +20,15 @@
+ #include <linux/of.h>
+ #include <linux/clk/zynq.h>
+ 
++#ifndef NONSECURE_HW_ACCESS
++#undef readl
++#undef writel
++#define readl(addr) \
++    secure_read(addr)
++#define writel(val, addr) \
++    secure_write(val, addr)
++#endif
++
+ #define SLCR_ARM_CLK_CTRL		(slcr_base + 0x120)
+ #define SLCR_DDR_CLK_CTRL		(slcr_base + 0x124)
+ #define SLCR_DCI_CLK_CTRL		(slcr_base + 0x128)
+@@ -40,8 +49,12 @@
+ #define SLCR_FPGA3_CLK_CTRL		(slcr_base + 0x1a0)
+ #define SLCR_621_TRUE			(slcr_base + 0x1c4)
+ 
+-static void __iomem *zynq_slcr_base;
++extern uint32_t secure_read(void *);
++extern void secure_write(uint32_t, void *);
+ 
++/* add static */
++void __iomem *zynq_slcr_base1;
++/*static void __iomem *zynq_slcr_base; */
+ 
+ /* clock implementation for Zynq PLLs */
+ 
+@@ -419,9 +432,13 @@ static void clk_register_zynq_pll(struct device_node *np)
+ 
+ 	/* Populate the struct */
+ 	pll->hw.init = &initd;
+-	pll->pll_ctrl = zynq_slcr_base + regs[0];
++	/* pll->pll_ctrl = zynq_slcr_base + regs[0];
+ 	pll->pll_cfg = zynq_slcr_base + regs[1];
+-	pll->pll_status = zynq_slcr_base + regs[2];
++	pll->pll_status = zynq_slcr_base + regs[2]; */
++	pll->pll_ctrl = 0xf8000000 + regs[0];
++	pll->pll_cfg = 0xf8000000 + regs[1];
++	pll->pll_status = 0xf8000000 + regs[2];
++
+ 	spin_lock_init(&pll->lock);
+ 	ret = of_property_read_u32(np, "lockbit", &pll->lockbit);
+ 	if (WARN_ON(ret))
+@@ -524,8 +541,8 @@ void __init zynq_clock_init(void __iomem *slcr_base)
+ 	struct clk *clk;
+ 
+ 	pr_info("Zynq clock init\n");
++	zynq_slcr_base1 = slcr_base; 
+ 
+-	zynq_slcr_base = slcr_base;
+ 	of_clk_init(clk_match);
+ 
+ 	/* CPU clocks */
+diff --git a/drivers/dma/xilinx/xilinx_axidma.c b/drivers/dma/xilinx/xilinx_axidma.c
+index b4a85c7..3dd0c76 100644
+--- a/drivers/dma/xilinx/xilinx_axidma.c
++++ b/drivers/dma/xilinx/xilinx_axidma.c
+@@ -113,13 +113,22 @@
+ #define XILINX_DMA_DEVICE_ID_SHIFT	28
+ 
+ /* IO accessors */
++#define NONSECURE_HW_ACCESS
++#ifdef NONSECURE_HW_ACCESS
+ #define DMA_OUT(addr, val)	(iowrite32(val, addr))
+ #define DMA_IN(addr)		(ioread32(addr))
++#else
++#define DMA_OUT(addr, val)  (secure_write(val, addr))
++#define DMA_IN(addr)  (secure_read(addr))
++#endif
+ 
+ #ifdef CONFIG_XILINX_DMATEST
+ #define TEST_DMA_WITH_LOOPBACK
+ #endif
+ 
++extern uint32_t secure_read(void *);
++extern void secure_write(uint32_t, void *);
++
+ /* Hardware descriptor */
+ struct xilinx_dma_desc_hw {
+ 	u32 next_desc;	/* 0x00 */
+@@ -1109,7 +1118,6 @@ static int xilinx_dma_of_probe(struct platform_device *op)
+ 	 * Axi DMA only do slave transfers
+ 	 */
+ 	if (of_device_is_compatible(node, "xlnx,axi-dma")) {
+-
+ 		xdev->feature |= XILINX_DMA_IP_DMA;
+ 		value = of_get_property(node,
+ 				"xlnx,sg-include-stscntrl-strm",
+diff --git a/drivers/dma/xilinx/xilinx_axivdma.c b/drivers/dma/xilinx/xilinx_axivdma.c
+index 4720757..06af680 100644
+--- a/drivers/dma/xilinx/xilinx_axivdma.c
++++ b/drivers/dma/xilinx/xilinx_axivdma.c
+@@ -143,8 +143,17 @@
+ #define XILINX_VDMA_DEVICE_ID_SHIFT	28
+ 
+ /* IO accessors */
++#define NONSECURE_HW_ACCESS
++#ifdef NONSECURE_HW_ACCESS
+ #define VDMA_OUT(addr, val)	(iowrite32(val, addr))
+ #define VDMA_IN(addr)		(ioread32(addr))
++#else
++#define VDMA_OUT(addr, val)  (secure_write(val, addr))
++#define VDMA_IN(addr)  (secure_read(addr))
++#endif
++
++extern uint32_t secure_read(void *);
++extern void secure_write(uint32_t, void *);
+ 
+ /* Hardware descriptor */
+ struct xilinx_vdma_desc_hw {
+@@ -586,7 +595,7 @@ static int vdma_init(struct xilinx_vdma_chan *chan)
+ {
+ 	int loop = XILINX_VDMA_RESET_LOOP;
+ 	u32 tmp;
+-
++	
+ 	VDMA_OUT(&chan->regs->cr,
+ 		VDMA_IN(&chan->regs->cr) | XILINX_VDMA_CR_RESET_MASK);
+ 
+@@ -1232,8 +1241,9 @@ static int xilinx_vdma_of_probe(struct platform_device *op)
+ 		}
+ 
+ 		value = of_get_property(node, "xlnx,num-fstores", NULL);
+-		if (value)
++		if (value) {
+ 			num_frames = be32_to_cpup(value);
++		}
+ 
+ 		value = of_get_property(node, "xlnx,flush-fsync", NULL);
+ 		if (value)
+diff --git a/drivers/hwmon/xilinx-xadcps.c b/drivers/hwmon/xilinx-xadcps.c
+index 13463a1..ee1b29f 100644
+--- a/drivers/hwmon/xilinx-xadcps.c
++++ b/drivers/hwmon/xilinx-xadcps.c
+@@ -32,6 +32,33 @@
+ #include <linux/hwmon.h>
+ #include <linux/hwmon-sysfs.h>
+ 
++static u32 iobase_val;
++
++#ifndef NONSECURE_HW_ACCESS
++extern uint32_t secure_read(void *);
++extern void secure_write(u32, void *);
++
++static inline u32 sw_readl(void* addr)
++{
++    if(((u32)addr & 0xfffff000) == iobase_val) {
++        return secure_read(0xf8007000 + ((u32)addr & 0xfff));
++    }
++    else {
++        return readl(addr);
++    }
++}
++
++static inline u32 sw_writel(u32 val,void* addr)
++{
++    if(((u32)addr & 0xfffff000) == iobase_val) {
++        secure_write(val, 0xf8007000 + ((u32)addr & 0xfff));
++    }
++    else {
++        writel(val,addr);
++    }
++}
++#endif
++
+ /* XADC interface register offsets */
+ #define XADC_CONFIG	0x00
+ #define XADC_INTSTS	0x04
+@@ -119,8 +146,8 @@
+ /* Sequencer registers 0 */
+ #define REG_SEQ_V		(1 << 11)
+ 
+-#define READ(dev, reg) readl((dev->iobase + XADC_##reg))
+-#define WRITE(dev, reg, value) writel(value, dev->iobase+XADC_##reg)
++#define READ(dev, reg) sw_readl((dev->iobase + XADC_##reg))
++#define WRITE(dev, reg, value) sw_writel(value, dev->iobase+XADC_##reg)
+ 
+ #define GETFIELD(reg, field, value) \
+ 	(((value) >> (reg##_##field##_SHIFT)) & reg##_##field##_MSK)
+@@ -683,7 +710,6 @@ static int xadc_probe(struct platform_device *pdev)
+ 
+ 	xadc->mem = request_mem_region(xadc->mem->start,
+ 			resource_size(xadc->mem), pdev->name);
+-
+ 	if (!xadc->mem) {
+ 		ret = -ENODEV;
+ 		dev_err(xadc->dev, "Failed to request memory region\n");
+@@ -691,6 +717,8 @@ static int xadc_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	xadc->iobase = ioremap(xadc->mem->start, resource_size(xadc->mem));
++	iobase_val = ((u32)xadc->iobase & 0xfffff000);
++
+ 	if (!xadc->iobase) {
+ 		ret = -ENODEV;
+ 		dev_err(xadc->dev, "Failed to ioremap memory\n");
+@@ -730,8 +758,10 @@ static int xadc_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	WRITE(xadc, CONFIG, 0);
++
+ 	WRITE(xadc, CTL, 0); /* ~RESET */
+ 
++	
+ 	WRITE(xadc, CONFIG, XADC_CONFIG_WEDGE | /* Default values */
+ 		XADC_CONFIG_REDGE |
+ 		SETFIELD(XADC_CONFIG, TCKRATE, TCKRATE_DIV16) |
+@@ -754,7 +784,7 @@ static int xadc_probe(struct platform_device *pdev)
+ 		val & REG_FLAG_REF ? "internal" : "external");
+ 
+ 	clk_disable(xadc->clk);
+-
++	
+ 	return 0;
+ 
+ err_group:
+diff --git a/drivers/tty/serial/xilinx_uartps.c b/drivers/tty/serial/xilinx_uartps.c
+index 7d06a53..dbd048e 100644
+--- a/drivers/tty/serial/xilinx_uartps.c
++++ b/drivers/tty/serial/xilinx_uartps.c
+@@ -32,6 +32,32 @@
+ #include <linux/slab.h>
+ #include <linux/clk.h>
+ 
++struct uart_port *port;
++
++#ifndef NONSECURE_HW_ACCESS
++extern uint32_t secure_read(void *);
++extern void secure_write(uint32_t, void *);
++
++static inline u32 sw_ioread32(void* addr) {
++	if(((u32)addr & 0xfffff000) == port->membase) {
++		return secure_read(0xe0001000 + ((u32)addr & 0xfff));
++	}
++	else {
++		return ioread32(addr);
++	}
++}
++
++static inline u32 sw_iowrite32(u32 val,void* addr) {
++	if(((u32)addr & 0xfffff000) == port->membase) {
++		secure_write(val,0xe0001000 + ((u32)addr & 0xfff));
++	}
++	else {
++		iowrite32(val,addr);
++	}
++}
++#endif
++
++
+ #define XUARTPS_TTY_NAME	"ttyPS"
+ #define XUARTPS_NAME		"xuartps"
+ #define XUARTPS_MAJOR		0	/* use dynamic node allocation */
+@@ -42,8 +68,8 @@
+ 
+ #define XUARTPS_REGISTER_SPACE	0xFFF
+ 
+-#define xuartps_readl(offset)		ioread32(port->membase + offset)
+-#define xuartps_writel(val, offset)	iowrite32(val, port->membase + offset)
++#define xuartps_readl(offset)		sw_ioread32(port->membase + offset)
++#define xuartps_writel(val, offset)	sw_iowrite32(val, port->membase + offset)
+ 
+ /* Rx Trigger level */
+ static int rx_trigger_level = 56;
+@@ -399,6 +425,7 @@ static unsigned int xuartps_set_baud_rate(struct uart_port *port,
+ 	int div8;
+ 	struct xuartps *xuartps = port->private_data;
+ 
++#if 0
+ 	calc_baud = xuartps_calc_baud_divs(port->uartclk, baud, &bdiv, &cd,
+ 			&div8);
+ 
+@@ -411,7 +438,9 @@ static unsigned int xuartps_set_baud_rate(struct uart_port *port,
+ 	xuartps_writel(mreg, XUARTPS_MR_OFFSET);
+ 	xuartps_writel(cd, XUARTPS_BAUDGEN_OFFSET);
+ 	xuartps_writel(bdiv, XUARTPS_BAUDDIV_OFFSET);
++#endif
+ 	xuartps->baud = baud;
++	calc_baud= baud;
+ 
+ 	return calc_baud;
+ }
+@@ -1045,8 +1074,6 @@ static struct uart_port xuartps_port[2];
+  **/
+ static struct uart_port *xuartps_get_port(int id)
+ {
+-	struct uart_port *port;
+-
+ 	/* try the given port id if failed use default method */
+ 	if (xuartps_port[id].mapbase != 0) {
+ 		/* Find the next unused port */
+@@ -1158,6 +1185,7 @@ static void xuartps_console_write(struct console *co, const char *s,
+  **/
+ static int __init xuartps_console_setup(struct console *co, char *options)
+ {
++	
+ 	struct uart_port *port = &xuartps_port[co->index];
+ 	int baud = 9600;
+ 	int bits = 8;
+diff --git a/drivers/video/xylon/xylonfb/core/xylonfb-ioctl.c b/drivers/video/xylon/xylonfb/core/xylonfb-ioctl.c
+index 5b92e20..8d49cf8 100644
+--- a/drivers/video/xylon/xylonfb/core/xylonfb-ioctl.c
++++ b/drivers/video/xylon/xylonfb/core/xylonfb-ioctl.c
+@@ -16,6 +16,18 @@
+ #include "logicvc.h"
+ #include "xylonfb.h"
+ 
++#ifndef NONSECURE_HW_ACCESS
++#undef readl
++#undef writel
++#define readl(addr) \
++   secure_read(addr)
++#define writel(val, addr) \
++   secure_write(val, addr)
++#endif
++
++extern uint32_t secure_read(void *);
++extern void secure_write(uint32_t, void *);
++
+ 
+ static int xylonfb_get_vblank(struct fb_vblank *vblank, struct fb_info *fbi)
+ {
+diff --git a/drivers/video/xylon/xylonfb/core/xylonfb.c b/drivers/video/xylon/xylonfb/core/xylonfb.c
+index b26dbb2..8646435 100644
+--- a/drivers/video/xylon/xylonfb/core/xylonfb.c
++++ b/drivers/video/xylon/xylonfb/core/xylonfb.c
+@@ -24,6 +24,14 @@
+ #include "../misc/xylonfb-misc.h"
+ #endif
+ 
++#ifndef NONSECURE_HW_ACCESS
++#undef readl
++#undef writel
++#define readl(addr) \
++   secure_read(addr)
++#define writel(val, addr) \
++   secure_write(val, addr)
++#endif
+ 
+ #define XYLONFB_PSEUDO_PALETTE_SZ 256
+ 
+@@ -31,6 +39,8 @@
+ #define LOGICVC_PIX_FMT_AVUY  v4l2_fourcc('A', 'V', 'U', 'Y')
+ #define LOGICVC_PIX_FMT_ALPHA v4l2_fourcc('A', '8', ' ', ' ')
+ 
++extern uint32_t secure_read(void *);
++extern void secure_write(uint32_t, void *);
+ 
+ static struct xylonfb_vmode_data xylonfb_vmode = {
+ 	.fb_vmode = {
+@@ -1680,7 +1690,11 @@ int xylonfb_init_driver(struct xylonfb_init_data *init_data)
+ 
+ 	reg_base_phys = reg_res->start;
+ 	reg_range = reg_res->end - reg_res->start;
++#ifdef NONSECURE_HW_ACCESS
+ 	reg_base_virt = ioremap_nocache(reg_base_phys, reg_range);
++#else
++	reg_base_virt = reg_base_phys;
++#endif
+ 
+ 	/* load layer parameters for all layers */
+ 	for (i = 0; i < layers; i++)
+-- 
+1.7.9.5
+
